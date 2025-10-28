@@ -309,6 +309,132 @@ def main():
 
 ---
 
+#### 🧪 Testing Strategy: Test trong main() vs Test file riêng
+
+**Câu hỏi quan trọng:** Nên test trong `main()` hay tạo file `test_phase2.py` riêng?
+
+**TL;DR:** Tùy phase của project!
+
+---
+
+##### **Approach 1: Test trong main() (RECOMMENDED cho Phase 2)**
+
+**Khi nào dùng:**
+- ✅ Prototype phase / POC (Proof of Concept)
+- ✅ Quick experiment để verify API hoạt động
+- ✅ Test code đơn giản (< 20 dòng)
+- ✅ Sẽ xóa test code sau khi verify OK
+
+**Ưu điểm:**
+- Nhanh, đơn giản, 1 file duy nhất
+- Dễ debug cho beginners
+- Phù hợp learning projects
+
+**Nhược điểm:**
+- Main function bloated khi project lớn
+- Mix production + test code
+- Không reusable
+
+**Code example:**
+```python
+def main():
+    # ... setup code ...
+
+    # === TEST PHASE 2 (sẽ xóa sau) ===
+    test_text = "Hello test"
+    audio_data = generate_audio_data(client, test_text)
+    save_wav_file("test_output.wav", audio_data)
+    # === END TEST ===
+```
+
+**Cleanup sau Phase 2:**
+Sau khi verify `test_output.wav` phát được → **Xóa toàn bộ phần TEST** → Giữ main() clean cho Phase 3.
+
+---
+
+##### **Approach 2: Test file riêng (RECOMMENDED cho Phase 3+)**
+
+**Khi nào dùng:**
+- ✅ Production code
+- ✅ Cần test nhiều scenarios
+- ✅ Professional projects
+- ✅ Team collaboration
+
+**Cấu trúc file:**
+```
+Text-To-Speech-Gemini/
+├── audiobook_generator.py     # Production (clean!)
+├── test_phase2.py              # Test Phase 2
+├── test_phase3.py              # Test Phase 3
+└── tests/                      # Unit tests (advanced)
+    └── test_save_wav.py
+```
+
+**Code example - test_phase2.py:**
+```python
+"""Test Phase 2: Core TTS Logic"""
+from audiobook_generator import generate_audio_data, save_wav_file
+from google import genai
+import os
+
+def test_tts_basic():
+    print("=== TEST PHASE 2 ===")
+
+    client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
+    test_text = "Hello! This is a test."
+
+    try:
+        # Test generate_audio_data()
+        audio_data = generate_audio_data(client, test_text)
+        print(f"✅ Generated {len(audio_data)} bytes")
+
+        # Test save_wav_file()
+        save_wav_file("test_output.wav", audio_data)
+        print("✅ Saved test_output.wav")
+
+        # Verify
+        file_size = os.path.getsize("test_output.wav")
+        if file_size > 1000:
+            print("🎉 Phase 2 PASSED!")
+        else:
+            print("⚠️  Warning: File too small")
+
+    except Exception as e:
+        print(f"❌ FAILED: {e}")
+
+if __name__ == "__main__":
+    test_tts_basic()
+```
+
+**Chạy test:**
+```bash
+uv run test_phase2.py           # Test
+uv run audiobook_generator.py   # Production
+```
+
+**Ưu điểm:**
+- Separation of concerns
+- Production code sạch sẽ
+- Dễ maintain và mở rộng
+- Professional practice
+
+---
+
+##### **📋 Decision Guide**
+
+| Phase | Approach | Lý do |
+|-------|----------|-------|
+| Phase 1-2 | Test trong main() | Prototype, quick validation |
+| Phase 3+ | Test file riêng | Production-ready code |
+| Final | Unit tests (pytest) | Professional quality |
+
+**Recommendation cho project này:**
+1. **Phase 2:** Test trong main() (quick & dirty)
+2. **Sau Phase 2:** Xóa test code, cleanup main()
+3. **Phase 3+:** Tạo test files riêng nếu cần
+
+---
+
 **Kết quả mong đợi sau Phase 2:**
 - ✅ File `test_output.wav` được tạo thành công
 - ✅ File có thể phát được và nghe thấy text được đọc bằng giọng Charon
