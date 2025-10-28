@@ -1,0 +1,49 @@
+{
+  "general": {
+    "checkpointing": {
+      "enabled": true
+    }
+  },
+  "mcpServers": {
+    "perplexity-ask": {
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "-e",
+        "PERPLEXITY_API_KEY",
+        "mcp/perplexity-ask"
+      ],
+      "env": {
+        "PERPLEXITY_API_KEY": "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"
+      }
+    },
+    "sequential-thinking": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-sequential-thinking"]
+    },
+    "neo4j-cypher": {
+      "command": "uvx",
+      "args": ["mcp-neo4j-cypher@0.3.0", "--transport", "stdio"],
+      "env": {
+        "NEO4J_URI": "bolt://localhost:7687",
+        "NEO4J_USERNAME": "neo4j",
+        "NEO4J_PASSWORD": "password123"
+      }
+    },
+    "neo4j-memory": {
+      "command": "uvx",
+      "args": ["mcp-neo4j-memory@0.2.0"],
+      "env": {
+        "NEO4J_URI": "bolt://localhost:7687",
+        "NEO4J_USERNAME": "neo4j",
+        "NEO4J_PASSWORD": "password123"
+      }
+    },
+    "claude-ipc": {
+      "command": "uvx",
+      "args": ["--from", "/Users/tttv/.claude-ipc-mcp", "claude-ipc-mcp"]
+    }
+  }
+}
