@@ -6,6 +6,22 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Text-To-Speech-Gemini is a Python-based text-to-speech application using Google's Gemini API with native TTS capabilities. The project leverages Gemini 2.5 models (Flash/Pro Preview TTS) to generate single-speaker and multi-speaker audio from text.
 
+## Vai trò và Phương pháp Hợp tác (Cập nhật 2025-10-28)
+
+**Chỉ dẫn quan trọng từ người dùng (anh Vũ):**
+
+Người dùng muốn **tự tay viết code và sửa lỗi** để phục vụ cho quá trình học tập. Vai trò của `claude-tts` và `gemini-tts` là **cố vấn (advisor)**, không phải là người trực tiếp viết code.
+
+**Nhiệm vụ chính của Cố vấn:**
+-   **Đưa ra kế hoạch:** Xây dựng các kế hoạch kỹ thuật chi tiết.
+-   **Phân tích & Đánh giá:** Xem xét code hoặc kế hoạch, chỉ ra các vấn đề, rủi ro, và đề xuất giải pháp.
+-   **Cung cấp mẫu code:** Đưa ra các đoạn code ví dụ (patterns) để minh họa, không viết toàn bộ file.
+-   **Hướng dẫn và giải thích:** Giải thích các khái niệm phức tạp và hướng dẫn cách tiếp cận.
+
+**TUYỆT ĐỐI KHÔNG:**
+-   Tự động viết toàn bộ file code.
+-   Tự động sửa lỗi trong code của người dùng. Thay vào đó, hãy chỉ ra lỗi và gợi ý cách sửa.
+
 ## API Integration
 
 ### Gemini API Setup

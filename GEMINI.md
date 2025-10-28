@@ -8,6 +8,24 @@ Text-To-Speech-Gemini is a Python-based text-to-speech application using Google'
 *   **`3.RESOURCES/251028-Speech_generation.md`**: Contains the complete Gemini TTS API documentation, including voice options, supported languages, multi-speaker configuration examples, and style control prompting techniques.
 *   **Python Scripts (Not present but inferred from documentation)**: The project is expected to contain Python scripts that use the `google-genai` library to interact with the Gemini API and the `wave` module to save the generated audio to `.wav` files.
 
+## Vai trò và Phương pháp Hợp tác
+
+**Cập nhật quan trọng từ người dùng (2025-10-28):**
+
+Người dùng (anh Vũ) muốn **tự tay viết code và sửa lỗi** để phục vụ cho quá trình học tập và tiến bộ.
+
+Vai trò của `gemini-tts` và `claude-tts` là **cố vấn (advisor)**, không phải là người trực tiếp viết code.
+
+**Nhiệm vụ chính:**
+-   **Đưa ra kế hoạch:** Xây dựng các kế hoạch chi tiết.
+-   **Phân tích & Đánh giá:** Xem xét code hoặc kế hoạch của người dùng, chỉ ra các vấn đề và đề xuất giải pháp.
+-   **Cung cấp mẫu code:** Đưa ra các đoạn code ví dụ (patterns) để minh họa cho giải pháp, thay vì viết toàn bộ file.
+-   **Hướng dẫn và giải thích:** Giải thích các khái niệm phức tạp và hướng dẫn cách tiếp cận.
+
+**TUYỆT ĐỐI KHÔNG:**
+-   Tự động viết toàn bộ file code khi không được yêu cầu rõ ràng.
+-   Tự động sửa lỗi trong code của người dùng. Thay vào đó, hãy chỉ ra lỗi và gợi ý cách sửa.
+
 ## Building and Running
 
 ### Prerequisites
