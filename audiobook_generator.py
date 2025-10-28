@@ -26,7 +26,26 @@ def save_wav_file(filename, pcm_data, channels=1, rate=24000, sample_width=2):
         wf.setframerate(rate)  # 24kHz
         wf.writeframes(pcm_data)  # Write PCM data
 
-def generate_audio_data()
+
+def generate_audio_data(client, text, voice="Charon"):
+    response = client.models.generate_content(
+        model="gemini-2.5-flash-preview-tts",
+        contents=text,
+        config=types.GenerateContentConfig(
+            response_modalities=["AUDIO"],
+            speech_config=types.SpeechConfig(
+                voice_config=types.VoiceConfig(
+                    prebuilt_voice_config=types.PrebuiltVoiceConfig(
+                        voice_name=voice,
+                    )
+                )
+            ),
+        ),
+    )
+
+    # Extract PCM data from response
+    pcm_data = response.candidates[0].content.parts[0].inline_data.data
+    return pcm_data
 
 
 def main():
