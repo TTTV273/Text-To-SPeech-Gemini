@@ -444,6 +444,245 @@ uv run audiobook_generator.py   # Production
 **Sau khi hoàn thành Phase 2, bạn có thể chuyển sang Phase 3: File Handling**
 
 ---
+
+### 🎯 Giai đoạn 3: File Handling (ĐANG THỰC HIỆN)
+
+**Mục tiêu:** Xử lý file Markdown từ đường dẫn thực tế, tạo output directory và lưu file WAV.
+
+**Giới hạn Phase 3:**
+- ⚠️ **CHƯA có chunking** - chỉ xử lý file ngắn (< 32k tokens)
+- ⚠️ **CHƯA có argparse** - hardcode test path trong main() để verify
+- ⚠️ **CHƯA có markdown cleaning** - assume text đã clean
+
+---
+
+#### 📚 Requirements Phase 3
+
+**Input:**
+- User chỉ định đường dẫn file chapter (ví dụ: `/path/to/chapter1.md`)
+
+**Process Flow:**
+1. Đọc nội dung text từ file (UTF-8 encoding)
+2. Parse paths: `parent_dir`, `output_dir`, `output_filename`
+3. Tạo thư mục `TTS` nếu chưa tồn tại
+4. Convert text → audio (reuse `generate_audio_data()`)
+5. Lưu file WAV với tên matching input
+
+**Output:**
+- File `.wav` trong thư mục `TTS` subfolder
+- Example: `/path/to/book/chapter1.md` → `/path/to/book/TTS/chapter1.wav`
+
+---
+
+#### 🔨 Bước 3.1: Thêm import `pathlib`
+
+**Tại sao dùng pathlib?**
+- Object-oriented path handling
+- Cross-platform (Windows, Linux, Mac)
+- Elegant syntax với `/` operator
+- Built-in methods: `.parent`, `.stem`, `.mkdir()`, etc.
+
+**Code:**
+```python
+from pathlib import Path  # Thêm sau import wave
+```
+
+**So sánh với os.path:**
+```python
+# Old way (os.path)
+parent_dir = os.path.dirname(file_path)
+output_dir = os.path.join(parent_dir, "TTS")
+filename = os.path.splitext(os.path.basename(file_path))[0]
+
+# New way (pathlib) - BETTER!
+input_path = Path(file_path)
+parent_dir = input_path.parent
+output_dir = parent_dir / "TTS"
+filename = input_path.stem
+```
+
+---
+
+#### 🔨 Bước 3.2: Implement `process_chapter()`
+
+**Function signature:**
+```python
+def process_chapter(client, file_path, voice="Kore"):
+    """
+    Xử lý một chapter: đọc file → convert → save audio
+
+    Args:
+        client: genai.Client instance
+        file_path: Đường dẫn đến file .md
+        voice: Giọng đọc (default: Kore)
+
+    Returns:
+        bool: True nếu thành công, False nếu thất bại
+    """
+```
+
+**Implementation:**
+```python
+def process_chapter(client, file_path, voice="Kore"):
+    try:
+        # Step 1: Parse paths
+        input_path = Path(file_path)
+        parent_dir = input_path.parent
+        output_dir = parent_dir / "TTS"
+        output_filename = input_path.stem + ".wav"  # chapter1.md → chapter1.wav
+        output_path = output_dir / output_filename
+
+        print(f"\n📖 Đang xử lý: {input_path.name}")
+
+        # Step 2: Create output directory
+        output_dir.mkdir(exist_ok=True)  # exist_ok=True: không lỗi nếu đã tồn tại
+        print(f"📁 Output directory: {output_dir}")
+
+        # Step 3: Read file content
+        with open(input_path, 'r', encoding='utf-8') as f:  # UTF-8 cho tiếng Việt!
+            content = f.read()
+
+        print(f"📄 Đã đọc {len(content)} ký tự")
+
+        # Step 4: Generate audio
+        print("🎙️  Đang chuyển đổi text thành audio...")
+        audio_data = generate_audio_data(client, content, voice=voice)
+        print(f"✅ Đã tạo {len(audio_data):,} bytes audio data")
+
+        # Step 5: Save WAV file
+        save_wav_file(str(output_path), audio_data)
+        print(f"💾 Đã lưu: {output_path}")
+
+        return True
+
+    except FileNotFoundError:
+        print(f"❌ Lỗi: Không tìm thấy file {file_path}")
+        return False
+    except Exception as e:
+        print(f"❌ Lỗi khi xử lý {file_path}: {e}")
+        import traceback
+        traceback.print_exc()
+        return False
+```
+
+---
+
+#### 📖 Key Points Giải thích
+
+**1. Path handling với pathlib:**
+```python
+input_path = Path(file_path)
+parent_dir = input_path.parent       # /path/to/book/chapter1.md → /path/to/book
+output_dir = parent_dir / "TTS"      # /path/to/book + TTS → /path/to/book/TTS
+```
+
+**2. Filename conversion:**
+```python
+output_filename = input_path.stem + ".wav"
+# chapter1.md → stem="chapter1" → "chapter1.wav"
+# prologue.md → stem="prologue" → "prologue.wav"
+```
+
+**3. Safe directory creation:**
+```python
+output_dir.mkdir(exist_ok=True)
+# exist_ok=True: Không raise exception nếu folder đã tồn tại
+# Tự động tạo nếu chưa có
+```
+
+**4. UTF-8 encoding (CRITICAL!):**
+```python
+with open(input_path, 'r', encoding='utf-8') as f:
+```
+- Mặc định Python có thể dùng encoding khác → lỗi với tiếng Việt
+- `encoding='utf-8'` đảm bảo đọc đúng dấu tiếng Việt
+
+**5. Error handling layers:**
+```python
+except FileNotFoundError:        # Specific error → clear message
+except Exception as e:           # Catch-all → detailed traceback
+```
+
+---
+
+#### 🔨 Bước 3.3: Test với file thật
+
+**Chuẩn bị test file:**
+1. Tạo một file test ngắn (< 500 từ) với content Wheel of Time
+2. Đặt ở vị trí nào đó (ví dụ: `/Users/tttv/test_chapter.md`)
+
+**Update `main()` để test:**
+```python
+def main():
+    print("--- Bắt đầu quá trình tạo sách nói ---")
+    api_key = check_environment()
+
+    client = genai.Client(api_key=api_key)
+    print("\n--- Môi trường đã sẵn sàng! ---")
+
+    # === TEST PHASE 3: File Handling ===
+    test_file = "/path/to/your/test_chapter.md"  # ← Thay đường dẫn thật
+
+    success = process_chapter(client, test_file, voice="Kore")
+
+    if success:
+        print("\n✅ Phase 3 test PASSED!")
+    else:
+        print("\n❌ Phase 3 test FAILED!")
+```
+
+**Expected output:**
+```
+--- Bắt đầu quá trình tạo sách nói ---
+✅ Đã tìm thấy GEMINI_API_KEY.
+
+--- Môi trường đã sẵn sàng! ---
+
+📖 Đang xử lý: test_chapter.md
+📁 Output directory: /path/to/your/TTS
+📄 Đã đọc 1,234 ký tự
+🎙️  Đang chuyển đổi text thành audio...
+✅ Đã tạo 150,328 bytes audio data
+💾 Đã lưu: /path/to/your/TTS/test_chapter.wav
+
+✅ Phase 3 test PASSED!
+```
+
+---
+
+#### 🎓 Key Takeaways Phase 3
+
+**Kỹ năng đã học:**
+- ✅ Path manipulation với `pathlib` (modern Python)
+- ✅ File I/O với proper encoding (UTF-8)
+- ✅ Directory creation safety (`exist_ok=True`)
+- ✅ Error handling với specific exceptions
+- ✅ Function composition (reuse existing functions)
+- ✅ User experience với progress messages
+
+**Design patterns:**
+- ✅ Single Responsibility: `process_chapter()` orchestrates, không duplicate logic
+- ✅ DRY: Reuse `generate_audio_data()` và `save_wav_file()`
+- ✅ Fail-safe: Return boolean để caller biết success/failure
+
+---
+
+**Kết quả mong đợi sau Phase 3:**
+- ✅ File WAV được tạo trong thư mục `TTS` subfolder
+- ✅ Filename matches input (chapter1.md → chapter1.wav)
+- ✅ UTF-8 content đọc đúng (Vietnamese text OK)
+- ✅ Directory tự động tạo nếu chưa tồn tại
+- ✅ Error handling graceful
+
+**Giới hạn hiện tại (sẽ fix ở Phase 4):**
+- ⚠️ Chỉ xử lý được file ngắn (< 32k tokens)
+- ⚠️ Không có chunking cho file dài
+- ⚠️ Chưa clean markdown syntax
+- ⚠️ Chưa có CLI interface (argparse)
+
+**Sau khi hoàn thành Phase 3, bạn có thể chuyển sang Phase 4: Chunking**
+
+---
 ---
 ---
 
