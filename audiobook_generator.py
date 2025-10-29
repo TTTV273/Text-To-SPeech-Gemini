@@ -169,12 +169,12 @@ def process_chapter(client, file_path, voice="Kore"):
         total_tokens = count_tokens(clean_text)
         print(f"📊 Tổng số tokens: {total_tokens:,}")
 
-        if total_tokens > 20000:
-            print("⚠️  File vượt 20k tokens, cần chia nhỏ...")
-            text_chunks = split_into_chunks(clean_text, max_tokens=20000)
+        if total_tokens > 2000:
+            print("⚠️  File vượt 2k tokens, cần chia nhỏ...")
+            text_chunks = split_into_chunks(clean_text, max_tokens=2000)
             print(f"📦 Đã chia thành {len(text_chunks)} chunks")
         else:
-            print("✅ File nhỏ hơn 20k tokens, xử lý một lần")
+            print("✅ File nhỏ hơn 2k tokens, xử lý một lần")
             text_chunks = [clean_text]
 
         # Step 5: Generate audio for each chunk
