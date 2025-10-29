@@ -1,6 +1,7 @@
 import os
 import sys
 import wave
+from pathlib import Path
 
 from dotenv import load_dotenv
 from google import genai
@@ -48,6 +49,50 @@ def generate_audio_data(client, text, voice="Kore"):
     return pcm_data
 
 
+def process_chapter(client, file_path, voice="Kore"):
+    try:
+        # Step 1: Parse paths
+        input_path = Path(file_path)
+        parent_dir = input_path.parent
+        output_dir = parent_dir / "TTS"
+        output_filename = input_path.stem + ".wav"
+        output_path = output_dir / output_filename
+
+        print(f"\n📖 Đang xử lý: {input_path.name}")
+
+        # Step 2: Create output directory
+        output_dir.mkdir(exist_ok=True)
+        print(f"📁 Output directory: {output_dir}")
+
+        # Step 3: Read file content
+        with open(input_path, "r", encoding="utf-8") as f:
+            content = f.read()
+
+        print(f"📄 Đã đọc {len(content)} ký tự")
+
+        # Step 4: Generate audio
+        print("🎙️  Đang chuyển đổi text thành audio...")
+        audio_data = generate_audio_data(client, content, voice=voice)
+        print(f"✅ Đã tạo {len(audio_data):,} bytes audio data")
+
+        # Step 5: Save WAV file
+        save_wav_file(str(output_path), audio_data)
+        print(f"💾 Đã lưu: {output_path}")
+
+        return True
+
+    except FileNotFoundError:
+        print(f"❌ Lỗi: Không tìm thấy file {file_path}")
+        return False
+
+    except Exception as e:
+        print(f"❌ Lỗi khi xử lý {file_path}: {e}")
+        import traceback
+
+        traceback.print_exc()
+        return False
+
+
 def main():
     print("--- Bắt đầu quá trình tạo sách nói ---")
     api_key = check_environment()
@@ -55,32 +100,16 @@ def main():
     client = genai.Client(api_key=api_key)
     print("\n--- Môi trường đã sẵn sàng! ---")
 
-    # === TEST PHASE 2: Core TTS Logic ===
-    test_text = "Một số người đã nhìn quanh Moiraine khi cô bước ra phòng chung, vài người có ánh mắt thông cảm."
-    print(f"\n🎙️  Đang tạo audio cho text: {test_text}")
+    # === TEST PHASE 3: File Handling ===
+    test_file = os.path.expanduser(
+        "/Users/tttv/Library/Mobile Documents/com~apple~CloudDocs/Ebook/Robert Jordan/The Complete Wheel of Time (422)/B1-CH19-mini.md"
+    )
+    success = process_chapter(client, test_file, voice="Kore")
 
-    try:
-        print("⏳ Đang gọi Gemini API...")
-        audio_data = generate_audio_data(client, test_text, voice="Kore")
-        print(f"✅ Đã nhận được {len(audio_data):,} bytes audio data")
-
-        output_file = "test_output.wav"
-        save_wav_file(output_file, audio_data)
-        print(f"✅ Đã lưu file: {output_file}")
-
-        file_size = os.path.getsize(output_file)
-        print(f"📊 File size: {file_size:,} bytes")
-
-        if file_size < 1000:
-            print("⚠️  Cảnh báo: File quá nhỏ, có thể bị lỗi!")
-        else:
-            print("\n🎉 Phase 2 hoàn thành! Hãy mở file test_output.wav để nghe thử!")
-
-    except Exception as e:
-        print(f"\n❌ Lỗi xảy ra: {e}")
-        import traceback
-
-        traceback.print_exc()
+    if success:
+        print("\n🎉 Phase 3 test PASSED!")
+    else:
+        print("\n❌ Phase 3 test FAILED!")
 
 
 if __name__ == "__main__":
