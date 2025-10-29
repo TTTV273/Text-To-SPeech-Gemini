@@ -138,19 +138,53 @@ def process_chapter(client, file_path, voice="Kore"):
         print(f"📁 Output directory: {output_dir}")
 
         # Step 3: Read file content
+        print("📄 Đang đọc file...")
         with open(input_path, "r", encoding="utf-8") as f:
-            content = f.read()
+            markdown_text = f.read()
 
-        print(f"📄 Đã đọc {len(content)} ký tự")
+        print(f"🧼 Đang làm sạch Markdown ({len(markdown_text):,} ký tự)...")
+        clean_text = clean_markdown(markdown_text)
+        print(f"✅ Đã làm sạch còn {len(clean_text):,} ký tự")
 
-        # Step 4: Generate audio
-        print("🎙️  Đang chuyển đổi text thành audio...")
-        audio_data = generate_audio_data(client, content, voice=voice)
-        print(f"✅ Đã tạo {len(audio_data):,} bytes audio data")
+        # Step 4: Count tokens and split into chunks
+        total_tokens = count_tokens(clean_text)
+        print(f"📊 Tổng số tokens: {total_tokens:,}")
 
-        # Step 5: Save WAV file
-        save_wav_file(str(output_path), audio_data)
-        print(f"💾 Đã lưu: {output_path}")
+        if total_tokens > 20000:
+            print("⚠️  File vượt 20k tokens, cần chia nhỏ...")
+            text_chunks = split_into_chunks(clean_text, max_tokens=20000)
+            print(f"📦 Đã chia thành {len(text_chunks)} chunks")
+        else:
+            print("✅ File nhỏ hơn 20k tokens, xử lý một lần")
+            text_chunks = [clean_text]
+
+        # Step 5: Generate audio for each chunk
+        all_audio_parts = []
+        total_bytes = 0
+
+        for i, chunk in enumerate(text_chunks, 1):
+            print(f"\n🎙️  Đang xử lý chunk {i}/{len(text_chunks)}...")
+            print(f"   Chunk size: {count_tokens(chunk):,} tokens")
+
+            audio_part = generate_audio_data(client, chunk, voice=voice)
+            all_audio_parts.append(audio_part)
+            total_bytes += len(audio_part)
+
+            print(f"   ✅ Chunk {i} hoàn thành: {len(audio_part):,} bytes")
+
+        print(f"\n✅ Đã tạo xong {len(all_audio_parts)} phần audio")
+        print(
+            f"📊 Tổng dung lượng: {total_bytes:,} bytes ({total_bytes/1024/1024:.2f} MB)"
+        )
+
+        # Step 6: Concatenate all audio parts
+        print("🔗 Đang nối các phần audio...")
+        final_audio_data = b"".join(all_audio_parts)
+
+        # Step 7: Save WAV file
+        print(f"💾 Đang lưu file...")
+        save_wav_file(str(output_path), final_audio_data)
+        print(f"✅ Đã lưu: {output_path}")
 
         return True
 
@@ -173,9 +207,9 @@ def main():
     client = genai.Client(api_key=api_key)
     print("\n--- Môi trường đã sẵn sàng! ---")
 
-    # === TEST PHASE 3: File Handling ===
+    # === TEST PHASE 4: Chunking Support ===
     test_file = os.path.expanduser(
-        "/Users/tttv/Library/Mobile Documents/com~apple~CloudDocs/Ebook/Robert Jordan/The Complete Wheel of Time (422)/B1-CH19-mini.md"
+        "/Users/tttv/Library/Mobile Documents/com~apple~CloudDocs/Ebook/Robert Jordan/The Complete Wheel of Time (422)/B1-CH20.md"
     )
     success = process_chapter(client, test_file, voice="Kore")
 
