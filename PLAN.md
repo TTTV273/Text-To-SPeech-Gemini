@@ -1076,6 +1076,186 @@ def process_chapter(client, file_path, voice="Kore"):
 
 **Sau khi hoàn thành Phase 4, bạn có thể chuyển sang Phase 5: Integration & Polish**
 
+---
+
+### 🐛 Bug Fix: Missing Audio Content (Phát hiện 2025-10-29)
+
+**Triệu chứng:**
+- Audio file được tạo thành công với size lớn (28 MB)
+- Token count chính xác (8,816 tokens)
+- Nhưng audio bị thiếu một đoạn lớn content ở giữa (~40-50% nội dung)
+- Audio "nhảy" từ đoạn này sang đoạn khác
+
+**Ví dụ cụ thể với B1-CH20.md:**
+- Đọc đến: "Trong một khoảnh khắc, anh gần như có thể tin rằng cô ta thực sự là Aes Sedai."
+- Lập tức nhảy đến: "Anh đã từng thấy những Aes Sedai thấp hơn thống trị..."
+- Bị thiếu: 47 dòng content ở giữa (từ dòng 42-88)
+
+---
+
+#### 🔍 Root Cause Analysis
+
+**Giả thuyết chính:** Gemini API trả về audio trong **NHIỀU parts** nhưng code chỉ extract `parts[0]`.
+
+**Bằng chứng:**
+```python
+# Code hiện tại (dòng 121 trong audiobook_generator.py)
+pcm_data = response.candidates[0].content.parts[0].inline_data.data
+#                                          ^^^^^^^ CHỈ LẤY PART ĐẦU TIÊN!
+```
+
+**Lý do:**
+- Gemini TTS có thể chia long text thành multiple audio segments
+- Mỗi segment = 1 part trong `response.candidates[0].content.parts[]`
+- Nếu có 3 parts nhưng ta chỉ lấy parts[0] → mất 2/3 audio!
+
+**Tại sao không phải lỗi khác:**
+- ✅ `clean_markdown()` hoạt động đúng (verified: text còn đầy đủ)
+- ✅ Token counting chính xác (8,816 tokens = đúng)
+- ✅ File đọc đầy đủ (17,618 chars = full content)
+- ✅ Audio concatenation logic đúng (b''.join() works)
+
+---
+
+#### 🔧 Solution: Extract ALL Audio Parts
+
+**Cần update function `generate_audio_data()` (dòng 104-122):**
+
+**Code mới:**
+```python
+# TODO(human): Handle multiple audio parts
+def generate_audio_data(client, text, voice="Kore"):
+    """
+    Gọi Gemini TTS API để convert text → audio
+
+    Args:
+        client: genai.Client instance
+        text: Text cần convert
+        voice: Giọng đọc (default: Kore)
+
+    Returns:
+        bytes: Raw PCM audio data (concatenated from all parts)
+    """
+    response = client.models.generate_content(
+        model="gemini-2.5-flash-preview-tts",
+        contents=text,
+        config=types.GenerateContentConfig(
+            response_modalities=["AUDIO"],
+            speech_config=types.SpeechConfig(
+                voice_config=types.VoiceConfig(
+                    prebuilt_voice_config=types.PrebuiltVoiceConfig(
+                        voice_name=voice,
+                    )
+                )
+            ),
+        ),
+    )
+
+    # Extract ALL audio parts (not just parts[0]!)
+    parts = response.candidates[0].content.parts
+    all_audio_parts = []
+
+    print(f"   📦 API trả về {len(parts)} parts")
+
+    for i, part in enumerate(parts, 1):
+        if hasattr(part, 'inline_data') and part.inline_data:
+            audio_data = part.inline_data.data
+            all_audio_parts.append(audio_data)
+            print(f"      Part {i}: {len(audio_data):,} bytes")
+        else:
+            print(f"      Part {i}: No audio data (text part?)")
+
+    if len(all_audio_parts) == 0:
+        raise ValueError("No audio data found in API response!")
+
+    # Concatenate all parts
+    final_audio = b''.join(all_audio_parts)
+    print(f"   ✅ Tổng audio: {len(final_audio):,} bytes")
+
+    return final_audio
+```
+
+---
+
+#### 📋 Implementation Checklist
+
+**Anh cần làm:**
+
+1. ✅ **Backup code hiện tại:**
+   ```bash
+   cp audiobook_generator.py audiobook_generator.py.backup
+   ```
+
+2. ✅ **Update `generate_audio_data()`:**
+   - Replace function (dòng 104-122) bằng version mới ở trên
+   - Thêm logic loop qua ALL parts
+   - Thêm debug logging (số parts, size từng part)
+
+3. ✅ **Test với file đã bị lỗi:**
+   ```bash
+   # Delete file bị lỗi
+   rm "/Users/tttv/Library/Mobile Documents/com~apple~CloudDocs/Ebook/Robert Jordan/The Complete Wheel of Time (422)/TTS/B1-CH20.wav"
+
+   # Regenerate
+   uv run audiobook_generator.py
+   ```
+
+4. ✅ **Verify fix:**
+   - Check console output: Có hiển thị "API trả về X parts" không?
+   - Check audio duration: Có dài hơn version cũ không?
+   - Nghe audio: Content có đầy đủ không?
+   - So sánh với text: Audio có match full 17,618 chars không?
+
+---
+
+#### 🎓 Key Learnings
+
+**Bài học quan trọng:**
+1. **Never assume API response structure** - Always inspect actual response
+2. **Test with various content lengths** - Short vs long text may behave differently
+3. **Debug logging is critical** - Print intermediate values để catch issues early
+4. **Validate output** - Don't just check file size, verify actual content
+
+**API Response Structure:**
+```
+response
+└── candidates[0]
+    └── content
+        └── parts[]  ← THIS IS AN ARRAY!
+            ├── parts[0].inline_data.data  ← Audio segment 1
+            ├── parts[1].inline_data.data  ← Audio segment 2
+            └── parts[2].inline_data.data  ← Audio segment 3
+```
+
+**Tại sao API chia thành multiple parts:**
+- Internal processing limits
+- Streaming optimization
+- Better error recovery
+- Quality control per segment
+
+---
+
+#### 🧪 Expected Results After Fix
+
+**Console output:**
+```
+🎙️  Đang xử lý chunk 1/1...
+   Chunk size: 8,816 tokens
+   📦 API trả về 3 parts
+      Part 1: 10,234,567 bytes
+      Part 2: 9,876,543 bytes
+      Part 3: 9,476,616 bytes
+   ✅ Tổng audio: 29,587,726 bytes
+   ✅ Chunk 1 hoàn thành: 29,587,726 bytes
+```
+
+**Audio verification:**
+- Duration: ~10-12 minutes (for 8,816 tokens)
+- Content: Full chapter từ đầu đến cuối
+- No gaps or jumps
+
+---
+
 
 ---
 ---
