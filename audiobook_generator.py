@@ -117,9 +117,28 @@ def generate_audio_data(client, text, voice="Kore"):
         ),
     )
 
-    # Extract PCM data from response
-    pcm_data = response.candidates[0].content.parts[0].inline_data.data
-    return pcm_data
+    # Extract ALL audio parts (not just parts[0]!)
+    parts = response.candidates[0].content.parts
+    all_audio_parts = []
+
+    print(f"   📦 API trả về {len(parts)} parts")
+
+    for i, part in enumerate(parts, 1):
+        if hasattr(part, "inline_data") and part.inline_data:
+            audio_data = part.inline_data.data
+            all_audio_parts.append(audio_data)
+            print(f"      Part {i}: {len(audio_data):,} bytes")
+        else:
+            print(f"      Part {i}: No audio data (text part?)")
+
+    if len(all_audio_parts) == 0:
+        raise ValueError("No audio data found in API response!")
+
+    # Concatenate all parts
+    final_audio = b"".join(all_audio_parts)
+    print(f"   ✅ Tổng audio: {len(final_audio):,} bytes")
+
+    return final_audio
 
 
 def process_chapter(client, file_path, voice="Kore"):
