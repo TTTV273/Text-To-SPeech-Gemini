@@ -86,7 +86,7 @@ def split_into_chunks(text: str, max_tokens: int = 20000) -> list[str]:
             current_chunk.append(para)
             current_token_count += para_tokens
 
-        # Add final chunk
+    # Add final chunk
     if current_chunk:
         chunks.append("\n\n".join(current_chunk))
 
@@ -233,9 +233,9 @@ def main():
     success = process_chapter(client, test_file, voice="Kore")
 
     if success:
-        print("\n🎉 Phase 3 test PASSED!")
+        print("\n🎉 Phase 4 test PASSED!")
     else:
-        print("\n❌ Phase 3 test FAILED!")
+        print("\n❌ Phase 4 test FAILED!")
 
 
 if __name__ == "__main__":
