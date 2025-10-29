@@ -1,11 +1,16 @@
 import os
+import re
 import sys
 import wave
 from pathlib import Path
 
+import tiktoken
 from dotenv import load_dotenv
 from google import genai
 from google.genai import types
+
+# Setup encoding
+ENCODING = tiktoken.get_encoding("cl100k_base")
 
 load_dotenv()
 
@@ -18,6 +23,74 @@ def check_environment():
 
     print("✅ Đã tìm thấy GEMINI_API_KEY.")
     return api_key
+
+
+def clean_markdown(text: str) -> str:
+    # clean Headers
+    text = re.sub(r"^#+\s+", "", text, flags=re.MULTILINE)
+
+    # clean Bold
+    text = re.sub(r"\*\*([^*]+)\*\*", r"\1", text)
+
+    # clean Italic
+    text = re.sub(r"\*([^*]+)\*", r"\1", text)
+
+    # clean Link
+    text = re.sub(r"\[([^\]]+)\]\([^\)]+\)", r"\1", text)
+
+    # clean Code Block
+    text = re.sub(r"```[^`]*```", "", text, flags=re.DOTALL)
+
+    # clean in line code
+    text = re.sub(r"`([^`]+)`", r"\1", text)
+
+    # clean image
+    text = re.sub(r"!\[([^\]]*)\]\([^\)]+\)", "", text)
+
+    return text
+
+
+def count_tokens(text: str) -> int:
+    """Count token in text"""
+    return len(ENCODING.encode(text))
+
+
+def split_into_chunks(text: str, max_tokens: int = 20000) -> list[str]:
+    """Split text into token-safe chunks"""
+    chunks = []
+    current_chunk = []
+    current_token_count = 0
+
+    # Split by paragraphs (double newline)
+    paragraphs = text.split("\n\n")
+
+    for para in paragraphs:
+        para = para.strip()
+        if not para:
+            continue
+
+        # Count tokens for this paragraph
+        para_tokens = count_tokens(para)
+
+        # Check if adding this para would exceed limit
+        if current_token_count + para_tokens > max_tokens:
+            # Finalize current chunk
+            if current_chunk:
+                chunks.append("\n\n".join(current_chunk))
+
+                # Start new chunk with this paragraph
+                current_chunk = [para]
+                current_token_count = para_tokens
+        else:
+            # Add to current chunk
+            current_chunk.append(para)
+            current_token_count += para_tokens
+
+        # Add final chunk
+    if current_chunk:
+        chunks.append("\n\n".join(current_chunk))
+
+    return chunks
 
 
 def save_wav_file(filename, pcm_data, channels=1, rate=24000, sample_width=2):
