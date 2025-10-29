@@ -683,6 +683,401 @@ def main():
 **Sau khi hoàn thành Phase 3, bạn có thể chuyển sang Phase 4: Chunking**
 
 ---
+
+### 🎯 Giai đoạn 4: Chunking & Processing file dài (ĐANG THỰC HIỆN)
+
+**Mục tiêu:** Nâng cấp `process_chapter` để xử lý các file chapter có dung lượng lớn hơn 32k token một cách an toàn.
+
+**Yêu cầu:**
+- ✅ Làm sạch cú pháp Markdown từ text đầu vào
+- ✅ Implement logic chia văn bản (đã làm sạch) thành các `chunk` nhỏ hơn giới hạn token
+- ✅ Nối dữ liệu audio từ các `chunk` lại thành một file WAV duy nhất
+
+**Dependencies cần install:**
+```bash
+uv add tiktoken
+```
+
+---
+
+#### 📚 Kiến thức nền tảng: Chunking Strategy
+
+**Vấn đề:** Một chapter có thể dài 10,000 từ (~13k token), nhưng cũng có thể dài 50,000 từ (~65k token), vượt xa giới hạn 32k token của API.
+
+**Giải pháp (Greedy Algorithm):**
+1.  **Clean:** Làm sạch toàn bộ cú pháp Markdown để có text thuần
+2.  **Count:** Đếm tokens (không phải ký tự!) của text
+3.  **Split:** Tách text thành các đơn vị ngữ nghĩa (semantic units) - ưu tiên đoạn văn (tách bởi `\n\n`)
+4.  **Pack:** Lần lượt thêm từng đơn vị vào một `chunk` hiện tại, vừa thêm vừa đếm token
+5.  **Finalize Chunk:** Nếu việc thêm đơn vị tiếp theo làm `chunk` vượt quá giới hạn (20,000 token), thì đóng `chunk` hiện tại lại
+6.  **New Chunk:** Bắt đầu một `chunk` mới với đơn vị vừa không thêm được
+7.  **Repeat:** Lặp lại cho đến khi hết các đơn vị
+
+**Tại sao không chia theo ký tự?** Vì sẽ cắt đứt giữa chừng một từ, làm cho giọng đọc bị ngắt quãng, thiếu tự nhiên.
+
+**Tại sao max_tokens = 20k thay vì 32k?** Để có buffer an toàn, tránh edge cases khi token count không chính xác 100%.
+
+---
+
+#### 🔨 Bước 4.1: Install dependencies
+
+**Chạy lệnh:**
+```bash
+uv add tiktoken
+```
+
+**Verify installation:**
+```python
+import tiktoken
+print(tiktoken.list_encoding_names())
+# Output: ['gpt2', 'r50k_base', 'p50k_base', 'cl100k_base', ...]
+```
+
+---
+
+#### 🔨 Bước 4.2: Implement `clean_markdown()`
+
+**Chức năng:** Loại bỏ cú pháp Markdown, trả về plain text.
+
+**⚠️ IMPORTANT:** Không dùng `markdown-it-py` vì nó render ra HTML, không phải plain text!
+
+**Code mẫu (Regex approach - Simple & Reliable):**
+```python
+import re
+
+def clean_markdown(text: str) -> str:
+    """
+    Remove Markdown syntax từ text
+
+    Args:
+        text: Raw markdown text
+
+    Returns:
+        str: Plain text without markdown syntax
+    """
+    # Headers: # Title → Title
+    text = re.sub(r'^#+\s+', '', text, flags=re.MULTILINE)
+
+    # Bold: **text** → text
+    text = re.sub(r'\*\*([^*]+)\*\*', r'\1', text)
+
+    # Italic: *text* → text
+    text = re.sub(r'\*([^*]+)\*', r'\1', text)
+
+    # Links: [text](url) → text (keep text, remove URL)
+    text = re.sub(r'\[([^\]]+)\]\([^\)]+\)', r'\1', text)
+
+    # Code blocks: ```code``` → (remove completely)
+    text = re.sub(r'```[^`]*```', '', text, flags=re.DOTALL)
+
+    # Inline code: `code` → code
+    text = re.sub(r'`([^`]+)`', r'\1', text)
+
+    # Images: ![alt](url) → (remove completely)
+    text = re.sub(r'!\[([^\]]*)\]\([^\)]+\)', '', text)
+
+    return text
+```
+
+**Test example:**
+```python
+markdown = """
+# Chapter 1
+
+This is **bold** and *italic* text.
+Here's a [link](http://example.com).
+And `inline code`.
+"""
+
+clean_text = clean_markdown(markdown)
+# Output: "Chapter 1\n\nThis is bold and italic text.\nHere's a link.\nAnd inline code."
+```
+
+---
+
+#### 🔨 Bước 4.3: Implement token counting
+
+**Setup global encoding:**
+```python
+import tiktoken
+
+# Use GPT-4 encoding (best approximation for Gemini)
+ENCODING = tiktoken.get_encoding("cl100k_base")
+```
+
+**Implement count function:**
+```python
+def count_tokens(text: str) -> int:
+    """
+    Count tokens trong text
+
+    Args:
+        text: Input text
+
+    Returns:
+        int: Number of tokens
+    """
+    return len(ENCODING.encode(text))
+```
+
+**Example:**
+```python
+text = "Hello world! This is a test."
+tokens = count_tokens(text)
+print(f"{len(text)} chars = {tokens} tokens")
+# Output: "29 chars = 8 tokens"
+```
+
+**Why not just count characters?**
+```python
+# English: 1 word ≈ 1.3 tokens
+"Hello world" → 3 tokens (2 words)
+
+# Vietnamese: 1 word ≈ 2-3 tokens (due to encoding)
+"Xin chào" → 5 tokens (2 words)
+
+# Special chars: More tokens
+"🎉🎊🎈" → 9 tokens (3 chars!)
+```
+
+---
+
+#### 🔨 Bước 4.4: Implement `split_into_chunks()`
+
+**Function signature:**
+```python
+def split_into_chunks(text: str, max_tokens: int = 20000) -> list[str]:
+    """
+    Split text thành chunks theo token limit
+
+    Args:
+        text: Plain text (đã clean markdown)
+        max_tokens: Max tokens per chunk (default: 20k, buffer cho 32k limit)
+
+    Returns:
+        list[str]: List of text chunks
+    """
+```
+
+**Implementation:**
+```python
+def split_into_chunks(text: str, max_tokens: int = 20000) -> list[str]:
+    """Split text into token-safe chunks"""
+    chunks = []
+    current_chunk = []
+    current_token_count = 0
+
+    # Split by paragraphs (double newline)
+    paragraphs = text.split('\n\n')
+
+    for para in paragraphs:
+        para = para.strip()
+        if not para:
+            continue
+
+        # Count tokens for this paragraph
+        para_tokens = count_tokens(para)
+
+        # Check if adding this para would exceed limit
+        if current_token_count + para_tokens > max_tokens:
+            # Finalize current chunk
+            if current_chunk:
+                chunks.append('\n\n'.join(current_chunk))
+
+            # Start new chunk with this paragraph
+            current_chunk = [para]
+            current_token_count = para_tokens
+        else:
+            # Add to current chunk
+            current_chunk.append(para)
+            current_token_count += para_tokens
+
+    # Add final chunk
+    if current_chunk:
+        chunks.append('\n\n'.join(current_chunk))
+
+    return chunks
+```
+
+**Explanation:**
+- Split by `\n\n` (paragraphs) to maintain semantic units
+- Track token count, NOT character count
+- Use `\n\n`.join() to preserve paragraph breaks in chunks
+
+**Edge case handling:**
+```python
+# What if single paragraph > 20k tokens?
+# Solution: Split by sentences
+if para_tokens > max_tokens:
+    sentences = para.split('. ')
+    # Apply same chunking logic to sentences
+```
+
+---
+
+#### 🔨 Bước 4.5: Update `process_chapter()`
+
+**Full updated implementation:**
+```python
+def process_chapter(client, file_path, voice="Kore"):
+    """
+    Process a chapter with chunking support
+
+    Args:
+        client: genai.Client instance
+        file_path: Path to .md file
+        voice: Voice name
+
+    Returns:
+        bool: Success status
+    """
+    try:
+        # Step 1: Parse paths
+        input_path = Path(file_path)
+        parent_dir = input_path.parent
+        output_dir = parent_dir / "TTS"
+        output_filename = input_path.stem + ".wav"
+        output_path = output_dir / output_filename
+
+        print(f"\n📖 Đang xử lý: {input_path.name}")
+
+        # Step 2: Create output directory
+        output_dir.mkdir(exist_ok=True)
+        print(f"📁 Output directory: {output_dir}")
+
+        # Step 3: Read and clean file content
+        print("📄 Đang đọc file...")
+        with open(input_path, 'r', encoding='utf-8') as f:
+            markdown_text = f.read()
+
+        print(f"🧼 Đang làm sạch Markdown ({len(markdown_text):,} ký tự)...")
+        clean_text = clean_markdown(markdown_text)
+        print(f"✅ Đã làm sạch còn {len(clean_text):,} ký tự")
+
+        # Step 4: Count tokens and split into chunks
+        total_tokens = count_tokens(clean_text)
+        print(f"📊 Tổng số tokens: {total_tokens:,}")
+
+        if total_tokens > 20000:
+            print("⚠️  File vượt 20k tokens, cần chia nhỏ...")
+            text_chunks = split_into_chunks(clean_text, max_tokens=20000)
+            print(f"📦 Đã chia thành {len(text_chunks)} chunks")
+        else:
+            print("✅ File nhỏ hơn 20k tokens, xử lý một lần")
+            text_chunks = [clean_text]
+
+        # Step 5: Generate audio for each chunk
+        all_audio_parts = []
+        total_bytes = 0
+
+        for i, chunk in enumerate(text_chunks, 1):
+            print(f"\n🎙️  Đang xử lý chunk {i}/{len(text_chunks)}...")
+            print(f"   Chunk size: {count_tokens(chunk):,} tokens")
+
+            audio_part = generate_audio_data(client, chunk, voice=voice)
+            all_audio_parts.append(audio_part)
+            total_bytes += len(audio_part)
+
+            print(f"   ✅ Chunk {i} hoàn thành: {len(audio_part):,} bytes")
+
+        print(f"\n✅ Đã tạo xong {len(all_audio_parts)} phần audio")
+        print(f"📊 Tổng dung lượng: {total_bytes:,} bytes ({total_bytes/1024/1024:.2f} MB)")
+
+        # Step 6: Concatenate all audio parts
+        print("🔗 Đang nối các phần audio...")
+        final_audio_data = b''.join(all_audio_parts)
+
+        # Step 7: Save WAV file
+        print(f"💾 Đang lưu file...")
+        save_wav_file(str(output_path), final_audio_data)
+        print(f"✅ Đã lưu: {output_path}")
+
+        return True
+
+    except FileNotFoundError:
+        print(f"❌ Lỗi: Không tìm thấy file {file_path}")
+        return False
+    except Exception as e:
+        print(f"❌ Lỗi khi xử lý {file_path}: {e}")
+        import traceback
+        traceback.print_exc()
+        return False
+```
+
+**Key changes from Phase 3:**
+1. Added markdown cleaning step
+2. Added token counting
+3. Added chunking logic
+4. Loop through chunks for audio generation
+5. Concatenate all audio parts
+6. Better progress messages
+
+---
+
+#### 📋 Checklist Implementation cho Phase 4
+
+**Anh cần làm theo thứ tự:**
+
+1. ✅ **Install tiktoken:** `uv add tiktoken`
+2. ✅ **Import thêm:** Thêm `import re` và `import tiktoken` ở đầu file
+3. ✅ **Setup encoding:** Thêm global constant `ENCODING = tiktoken.get_encoding("cl100k_base")`
+4. ✅ **Thêm `clean_markdown()`:** Copy function vào file (sau imports)
+5. ✅ **Thêm `count_tokens()`:** Copy function vào file (sau `clean_markdown()`)
+6. ✅ **Thêm `split_into_chunks()`:** Copy function vào file (sau `count_tokens()`)
+7. ✅ **Update `process_chapter()`:** Replace toàn bộ function với version mới
+8. ✅ **Test với file:** Chạy với file WoT đã có
+9. ✅ **Verify output:** Check TTS folder có file WAV mới
+
+---
+
+#### 🎓 Key Takeaways Phase 4
+
+**Kỹ năng đã học:**
+- ✅ **Regex mastery:** Clean Markdown syntax với regex patterns
+- ✅ **Token counting:** Understand tokens vs characters (critical!)
+- ✅ **Chunking algorithm:** Greedy packing với semantic units
+- ✅ **Audio concatenation:** Binary data manipulation (bytes)
+- ✅ **Progress tracking:** UX for long-running operations
+
+**Important concepts:**
+- 🔑 **Tokens ≠ Characters:** 1 char có thể = 3 tokens (emoji), 1 word có thể = 1-3 tokens
+- 🔑 **Buffer safety:** 20k max thay vì 32k để có margin of error
+- 🔑 **Semantic chunking:** Chia theo paragraphs, không phải characters
+- 🔑 **PCM concatenation:** `b''.join()` works vì PCM là raw audio data
+- 🔑 **WAV header magic:** Chỉ cần 1 header cho toàn bộ concatenated audio
+
+**Design patterns:**
+- ✅ **Separation of concerns:** Clean → Count → Split → Generate → Concat
+- ✅ **Fail-safe:** Token counting prevents API errors
+- ✅ **User feedback:** Progress messages every step
+- ✅ **Composability:** Reuse existing `generate_audio_data()` and `save_wav_file()`
+
+---
+
+**Kết quả mong đợi sau Phase 4:**
+- ✅ Xử lý được file chapter dài (50k+ chars, 65k+ tokens)
+- ✅ Auto-split thành multiple chunks khi cần
+- ✅ Markdown syntax được clean hoàn toàn
+- ✅ Audio từ chunks được nối seamlessly
+- ✅ Progress messages rõ ràng cho từng chunk
+- ✅ File WAV output quality không đổi (vẫn 24kHz, 16-bit, mono)
+
+**Test scenarios:**
+- ✅ File ngắn (< 20k tokens): 1 chunk, xử lý trực tiếp
+- ✅ File trung bình (20k-40k tokens): 2 chunks
+- ✅ File dài (40k-60k tokens): 3+ chunks
+- ✅ File có markdown: Headers, bold, italic, links được clean
+
+**Giới hạn hiện tại (sẽ handle ở Phase 5):**
+- ⚠️ Chưa có CLI interface (argparse)
+- ⚠️ Chưa có batch processing (multiple files)
+- ⚠️ Chưa có skip existing files
+- ⚠️ Chưa có resume capability
+
+**Sau khi hoàn thành Phase 4, bạn có thể chuyển sang Phase 5: Integration & Polish**
+
+
+---
 ---
 ---
 
