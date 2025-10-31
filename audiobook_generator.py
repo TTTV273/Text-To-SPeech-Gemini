@@ -1,6 +1,5 @@
 import os
 import re
-import sys
 import wave
 from pathlib import Path
 
@@ -9,20 +8,13 @@ from dotenv import load_dotenv
 from google import genai
 from google.genai import types
 
+from api_key_manager import APIKeyManager
+
 # Setup encoding
 ENCODING = tiktoken.get_encoding("cl100k_base")
 
 load_dotenv()
-
-
-def check_environment():
-    api_key = os.getenv("GEMINI_API_KEY")
-    if not api_key:
-        print("LỖI: Biến môi trường 'GEMINI_API_KEY' không được tìm thấy.")
-        sys.exit(1)
-
-    print("✅ Đã tìm thấy GEMINI_API_KEY.")
-    return api_key
+api_key_manager = APIKeyManager(usage_file="api_usage.json", threshold=14)
 
 
 def clean_markdown(text: str) -> str:
@@ -228,7 +220,7 @@ def main():
 
     # === TEST PHASE 4: Chunking Support ===
     test_file = os.path.expanduser(
-        "/Users/tttv/Library/Mobile Documents/com~apple~CloudDocs/Ebook/Robert Jordan/The Complete Wheel of Time (422)/B1-CH20.md"
+        "/Users/tttv/Library/Mobile Documents/com~apple~CloudDocs/Ebook/Robert Jordan/The Complete Wheel of Time (422)/B1-CH22.md"
     )
     success = process_chapter(client, test_file, voice="Kore")
 
