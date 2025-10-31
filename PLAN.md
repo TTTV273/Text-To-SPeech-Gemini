@@ -1481,7 +1481,26 @@ GEMINI_API_KEY_3=AIza...  # Backup 2
 
 #### 🔄 Phase 5.3: APIKeyManager Class
 
-**Implementation:**
+**📁 File Structure (Separation of Concerns):**
+
+```
+Text-To-Speech-Gemini/
+├── audiobook_generator.py       # Main audiobook generation logic (~200 lines)
+├── api_key_manager.py           # NEW: API key management class (~150 lines)
+├── api_usage.json               # Usage tracking data (auto-generated)
+└── .env                         # API keys configuration
+```
+
+**Why Separate File?**
+- ✅ **Single Responsibility**: Each file has one clear purpose
+- ✅ **Maintainability**: Easier to navigate and modify
+- ✅ **Reusability**: APIKeyManager can be imported by other projects
+- ✅ **Testability**: Can unit test APIKeyManager independently
+- ✅ **File Size**: Keep files under 300 lines for readability
+
+---
+
+**File: `api_key_manager.py`**
 
 ```python
 import os
@@ -1623,6 +1642,16 @@ class APIKeyManager:
             print(f"  {status} Key #{i + 1} ({key_hash}): {usage}/15 requests {active_marker}")
 ```
 
+**Integration in `audiobook_generator.py`:**
+
+```python
+# At top of audiobook_generator.py
+from api_key_manager import APIKeyManager
+
+# After load_dotenv()
+api_key_manager = APIKeyManager(usage_file="api_usage.json", threshold=14)
+```
+
 ---
 
 #### 🔁 Phase 5.4: Retry Logic with Key Rotation
@@ -1744,12 +1773,14 @@ def generate_audio_data(client, text, voice="Kore", max_retries=3):
 - [ ] Test key loading
 
 **Phase 5.2: APIKeyManager Class**
-- [ ] Add `APIKeyManager` class to `audiobook_generator.py`
+- [ ] Create new file `api_key_manager.py`
+- [ ] Move `APIKeyManager` class from `audiobook_generator.py` to `api_key_manager.py`
 - [ ] Implement `load_keys()` with auto-discovery
 - [ ] Implement `load_usage()` với daily reset logic
 - [ ] Implement `rotate_key()` với availability check
 - [ ] Implement `log_request()` với persistence
 - [ ] Add `print_usage_stats()` for visibility
+- [ ] Update imports in `audiobook_generator.py`: `from api_key_manager import APIKeyManager`
 
 **Phase 5.3: Usage Tracking**
 - [ ] Create `api_usage.json` structure
