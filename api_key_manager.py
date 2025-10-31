@@ -12,8 +12,8 @@ class APIKeyManager:
         self.usage_file = Path(usage_file)
         self.threshold = threshold  # Max requests before rotation
         self.keys = self.load_keys()
-        self.usage_file = seld.load_usage()
-        self.current_index = self.usage_dat.get("current_key_index", 0)
+        self.usage_data = self.load_usage()
+        self.current_index = self.usage_data.get("current_key_index", 0)
 
     def load_keys(self):
         """Load all numbered API keys from environment"""
@@ -35,7 +35,7 @@ class APIKeyManager:
         print(f"📊 Loaded {len(keys)} API keys")
         return keys
 
-    def load_usage():
+    def load_usage(self):
         """Load usage data from JSON file"""
         if not self.usage_file.exists():
             return {
