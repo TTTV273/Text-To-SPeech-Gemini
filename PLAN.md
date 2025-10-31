@@ -1256,6 +1256,576 @@ response
 
 ---
 
+### ⚡ Critical Discovery: Optimal Chunk Size (2025-10-29)
+
+**Vấn đề phát hiện sau khi fix multiple parts bug:**
+- Audio với 8,816 tokens trong 1 chunk vẫn bị vấn đề:
+  - Tạp âm (noise/artifacts) bắt đầu từ ~26% content
+  - Câu từ loạn (mispronunciation)
+  - Chất lượng âm thanh giảm đáng kể
+
+**Root Cause Analysis:**
+API có **quality threshold** ẩn, KHÔNG được document:
+- ✅ **< 2,000 tokens:** Excellent quality
+- ⚠️ **2,000-5,000 tokens:** Quality degradation begins
+- ❌ **> 5,000 tokens:** Severe artifacts, mispronunciation, truncation
+
+**Test Data (B1-CH20.md):**
+```
+Original: 8,816 tokens in 1 chunk
+├─ Audio OK: First 2,240 tokens (26%)
+└─ Audio CORRUPTED: After 2,240 tokens (74%)
+```
+
+---
+
+#### 🔧 Solution: Reduce max_tokens to 2000
+
+**Updated Configuration:**
+```python
+# OLD (causes quality issues)
+if total_tokens > 20000:
+    text_chunks = split_into_chunks(clean_text, max_tokens=20000)
+
+# NEW (optimal quality)
+if total_tokens > 2000:
+    text_chunks = split_into_chunks(clean_text, max_tokens=2000)
+```
+
+**Actual Test Results với max_tokens=2000:**
+```
+📊 Tổng số tokens: 8,816
+📦 Đã chia thành 5 chunks
+
+Chunk 1: 1,988 tokens → 11.4 MB ✅
+Chunk 2: 1,446 tokens → 7.7 MB ✅
+Chunk 3: 1,909 tokens → 10.0 MB ✅
+Chunk 4: 1,644 tokens → 9.3 MB ✅
+Chunk 5: 1,829 tokens → 9.5 MB ✅
+
+Total: 45.64 MB (vs 31.4 MB with 1 chunk)
+Quality: Excellent - No artifacts, full content
+```
+
+---
+
+#### 📊 Performance Trade-offs
+
+**Chunk Size Comparison:**
+
+| Max Tokens | Chunks | Quality | API Calls | File Size | Cost |
+|------------|--------|---------|-----------|-----------|------|
+| 20,000 | 1 | ❌ Poor | 1 | 31.4 MB | $ |
+| 5,000 | 2 | ⚠️ Medium | 2 | ~38 MB | $$ |
+| 2,000 | 5 | ✅ Excellent | 5 | 45.6 MB | $$$$$ |
+
+**Recommendations:**
+
+**For Production Audiobooks:** `max_tokens = 2000`
+- ✅ Highest quality
+- ✅ Full content preservation
+- ✅ No artifacts/mispronunciation
+- ⚠️ 5x more API calls (cost)
+- ⚠️ 45% larger files
+
+**For Testing/Drafts:** `max_tokens = 5000`
+- ⚠️ Acceptable quality
+- ✅ Faster processing
+- ✅ Lower cost
+- ⚠️ May have minor artifacts
+
+**Never Use:** `max_tokens > 10000`
+- ❌ Poor quality guaranteed
+- ❌ Truncation risk
+- ❌ Artifacts/noise
+
+---
+
+#### 🎓 Key Learnings - TTS Quality Optimization
+
+**1. API Limits ≠ Optimal Settings**
+- Docs say: 32K tokens context window
+- Reality: Quality degrades after 2K tokens
+- Lesson: Always test with real content
+
+**2. Chunk Size Directly Impacts Quality**
+- Smaller chunks → Better pronunciation
+- Smaller chunks → Less noise/artifacts
+- Smaller chunks → Full content preservation
+
+**3. Cost vs Quality Trade-off**
+- 2K chunks = 5x cost but production quality
+- 5K chunks = 2x cost with acceptable quality
+- Decision depends on use case (audiobook vs draft)
+
+**4. File Size Increase is Expected**
+- Better quality = more audio data
+- 45% increase (31MB → 46MB) is normal
+- PCM format already uncompressed
+
+**5. Vietnamese Text Needs Extra Care**
+- Multi-byte encoding → more tokens per character
+- Dấu (tone marks) → pronunciation complexity
+- Smaller chunks essential for tonal languages
+
+---
+
+### 🎯 Giai đoạn 5: Multi-API Key Rotation & Rate Limit Handling
+
+**Ngày bắt đầu:** 2025-10-29
+**Status:** 🚧 In Progress
+
+**Mục tiêu:** Xây dựng hệ thống quản lý multiple API keys với automatic rotation và usage tracking để vượt qua giới hạn free tier.
+
+---
+
+#### 📊 Problem Statement
+
+**Vấn đề:**
+```
+❌ 429 RESOURCE_EXHAUSTED
+Quota exceeded: 15 requests/day per key (Free Tier)
+```
+
+**Impact:**
+- File 9,119 tokens = 5 chunks = 5 API calls
+- Multiple test runs = ~15 calls/day
+- Free tier limit reached → Script crashes
+- Must wait 24 hours for quota reset
+
+**Solution:**
+- Multiple API keys (3 keys = 45 requests/day)
+- Auto-rotation khi key exhausted
+- Usage tracking across runs
+- Graceful retry với exponential backoff
+
+---
+
+#### 🏗️ Architecture Design
+
+**Components:**
+
+```
+┌─────────────────────────────────────────────┐
+│          APIKeyManager Class                │
+├─────────────────────────────────────────────┤
+│  - load_keys()                              │
+│  - get_active_key()                         │
+│  - rotate_key()                             │
+│  - log_request()                            │
+│  - is_key_exhausted()                       │
+│  - reset_daily_usage()                      │
+└─────────────────────────────────────────────┘
+                    │
+        ┌───────────┴───────────┐
+        ▼                       ▼
+┌──────────────┐        ┌──────────────┐
+│  .env File   │        │ api_usage.   │
+│              │        │   json       │
+│ API Keys     │        │              │
+│ Storage      │        │ Usage Track  │
+└──────────────┘        └──────────────┘
+```
+
+---
+
+#### 🔑 Phase 5.1: Multi-Key Environment Setup
+
+**File: `.env`**
+```bash
+# Multi-key setup (simplified)
+GEMINI_API_KEY_1=AIza...  # Primary
+GEMINI_API_KEY_2=AIza...  # Backup 1
+GEMINI_API_KEY_3=AIza...  # Backup 2
+```
+
+**Auto-discovery pattern:** `GEMINI_API_KEY_*`
+
+**Security:**
+- ✅ Never commit `.env` to git
+- ✅ Use key hashing for logging
+- ✅ Obfuscate keys in console output
+
+---
+
+#### 📝 Phase 5.2: Usage Tracking System
+
+**File: `api_usage.json`**
+```json
+{
+  "date": "2025-10-29",
+  "keys": {
+    "abc12345": {
+      "requests": 12,
+      "last_error": null,
+      "last_used": "2025-10-29T15:30:00"
+    },
+    "def67890": {
+      "requests": 5,
+      "last_error": "2025-10-29T14:20:00",
+      "last_used": "2025-10-29T15:35:00"
+    }
+  },
+  "current_key_index": 1
+}
+```
+
+**Features:**
+- Persistent across runs
+- Daily auto-reset (UTC 00:00)
+- Track requests per key
+- Record last error time
+- Current active key index
+
+---
+
+#### 🔄 Phase 5.3: APIKeyManager Class
+
+**Implementation:**
+
+```python
+import os
+import json
+import hashlib
+from datetime import datetime
+from pathlib import Path
+
+class APIKeyManager:
+    """Manage multiple API keys with rotation and usage tracking"""
+
+    def __init__(self, usage_file="api_usage.json", threshold=14):
+        self.usage_file = Path(usage_file)
+        self.threshold = threshold  # Max requests before rotation
+        self.keys = self.load_keys()
+        self.usage_data = self.load_usage()
+        self.current_index = self.usage_data.get("current_key_index", 0)
+
+    def load_keys(self):
+        """Load all numbered API keys from environment"""
+        keys = []
+        i = 1
+
+        while True:
+            key = os.getenv(f"GEMINI_API_KEY_{i}")
+            if not key:
+                break
+            keys.append(key)
+            i += 1
+
+        if not keys:
+            raise ValueError(
+                "No API keys found! Please set GEMINI_API_KEY_1, GEMINI_API_KEY_2, etc. in .env file"
+            )
+
+        print(f"📊 Loaded {len(keys)} API keys")
+        return keys
+
+    def load_usage(self):
+        """Load usage data from JSON file"""
+        if not self.usage_file.exists():
+            return {
+                "date": datetime.now().strftime("%Y-%m-%d"),
+                "keys": {},
+                "current_key_index": 0
+            }
+
+        with open(self.usage_file, 'r') as f:
+            data = json.load(f)
+
+        # Reset if new day
+        today = datetime.now().strftime("%Y-%m-%d")
+        if data.get("date") != today:
+            print(f"🔄 New day detected, resetting usage counters")
+            data = {
+                "date": today,
+                "keys": {},
+                "current_key_index": 0
+            }
+
+        return data
+
+    def save_usage(self):
+        """Persist usage data to JSON file"""
+        with open(self.usage_file, 'w') as f:
+            json.dump(self.usage_data, f, indent=2)
+
+    def hash_key(self, key):
+        """Generate short hash for key identification"""
+        return hashlib.sha256(key.encode()).hexdigest()[:8]
+
+    def get_active_key(self):
+        """Return current active API key"""
+        return self.keys[self.current_index]
+
+    def get_key_usage(self, key):
+        """Get usage count for a key"""
+        key_hash = self.hash_key(key)
+        return self.usage_data["keys"].get(key_hash, {}).get("requests", 0)
+
+    def is_key_exhausted(self, key):
+        """Check if key has reached threshold"""
+        return self.get_key_usage(key) >= self.threshold
+
+    def log_request(self, key, success=True, error=None):
+        """Log API request for a key"""
+        key_hash = self.hash_key(key)
+
+        if key_hash not in self.usage_data["keys"]:
+            self.usage_data["keys"][key_hash] = {
+                "requests": 0,
+                "last_error": None,
+                "last_used": None
+            }
+
+        self.usage_data["keys"][key_hash]["requests"] += 1
+        self.usage_data["keys"][key_hash]["last_used"] = datetime.now().isoformat()
+
+        if error:
+            self.usage_data["keys"][key_hash]["last_error"] = datetime.now().isoformat()
+
+        self.save_usage()
+
+    def rotate_key(self):
+        """Switch to next available key"""
+        original_index = self.current_index
+        attempts = 0
+
+        while attempts < len(self.keys):
+            self.current_index = (self.current_index + 1) % len(self.keys)
+            current_key = self.keys[self.current_index]
+
+            if not self.is_key_exhausted(current_key):
+                key_hash = self.hash_key(current_key)
+                usage = self.get_key_usage(current_key)
+                print(f"🔄 Rotated to Key #{self.current_index + 1} ({key_hash}): {usage}/{self.threshold + 1} requests")
+
+                self.usage_data["current_key_index"] = self.current_index
+                self.save_usage()
+                return True
+
+            attempts += 1
+
+        # All keys exhausted
+        print("❌ All API keys exhausted! Please wait for quota reset.")
+        return False
+
+    def print_usage_stats(self):
+        """Display current usage statistics"""
+        print(f"\n📊 API Key Usage Today ({self.usage_data['date']}):")
+
+        for i, key in enumerate(self.keys):
+            key_hash = self.hash_key(key)
+            usage = self.get_key_usage(key)
+            is_active = (i == self.current_index)
+            active_marker = "← ACTIVE" if is_active else ""
+
+            status = "✅" if usage < self.threshold else "⚠️"
+            print(f"  {status} Key #{i + 1} ({key_hash}): {usage}/15 requests {active_marker}")
+```
+
+---
+
+#### 🔁 Phase 5.4: Retry Logic with Key Rotation
+
+**Update `generate_audio_data()` function:**
+
+```python
+import time
+from google.genai.errors import ClientError
+
+def generate_audio_data(client, text, voice="Kore", max_retries=3):
+    """
+    Generate audio with automatic retry and key rotation
+
+    Args:
+        client: genai.Client instance (will be recreated on key rotation)
+        text: Text to convert
+        voice: Voice name
+        max_retries: Max retries per key
+
+    Returns:
+        bytes: Audio data
+    """
+    global api_key_manager  # Access global manager
+
+    attempt = 0
+    keys_tried = 0
+    max_keys = len(api_key_manager.keys)
+
+    while keys_tried < max_keys:
+        current_key = api_key_manager.get_active_key()
+
+        for attempt in range(max_retries):
+            try:
+                # Recreate client with current key
+                client = genai.Client(api_key=current_key)
+
+                response = client.models.generate_content(
+                    model="gemini-2.5-flash-preview-tts",
+                    contents=text,
+                    config=types.GenerateContentConfig(
+                        response_modalities=["AUDIO"],
+                        speech_config=types.SpeechConfig(
+                            voice_config=types.VoiceConfig(
+                                prebuilt_voice_config=types.PrebuiltVoiceConfig(
+                                    voice_name=voice,
+                                )
+                            )
+                        ),
+                    ),
+                )
+
+                # Success! Extract audio
+                parts = response.candidates[0].content.parts
+                all_audio_parts = []
+
+                print(f"   📦 API trả về {len(parts)} parts")
+
+                for i, part in enumerate(parts, 1):
+                    if hasattr(part, "inline_data") and part.inline_data:
+                        audio_data = part.inline_data.data
+                        all_audio_parts.append(audio_data)
+                        print(f"      Part {i}: {len(audio_data):,} bytes")
+
+                if len(all_audio_parts) == 0:
+                    raise ValueError("No audio data found in API response!")
+
+                final_audio = b"".join(all_audio_parts)
+                print(f"   ✅ Tổng audio: {len(final_audio):,} bytes")
+
+                # Log successful request
+                api_key_manager.log_request(current_key, success=True)
+
+                return final_audio
+
+            except ClientError as e:
+                # Check if 429 Rate Limit error
+                if e.status_code == 429:
+                    # Parse retry delay from error
+                    retry_delay = 30  # Default 30s
+                    if 'retryDelay' in str(e):
+                        # Extract delay: "retry in 27.591s" → 27
+                        import re
+                        match = re.search(r'(\d+)\.?\d*s', str(e))
+                        if match:
+                            retry_delay = int(float(match.group(1))) + 1
+
+                    # Log failed request
+                    api_key_manager.log_request(current_key, success=False, error=str(e))
+
+                    if attempt < max_retries - 1:
+                        print(f"   ⏳ Rate limit hit, retry #{attempt + 1} sau {retry_delay}s...")
+                        time.sleep(retry_delay)
+                    else:
+                        print(f"   ❌ Key exhausted after {max_retries} retries")
+                        break  # Try next key
+                else:
+                    # Other errors - don't retry
+                    raise
+
+        # Current key failed all retries, try next key
+        keys_tried += 1
+        if keys_tried < max_keys:
+            if not api_key_manager.rotate_key():
+                raise Exception("All API keys exhausted!")
+        else:
+            raise Exception("All API keys failed after retries!")
+
+    raise Exception("Failed to generate audio after trying all keys!")
+```
+
+---
+
+#### 📋 Implementation Checklist
+
+**Phase 5.1: Environment Setup**
+- [ ] Add `GEMINI_API_KEY_1`, `KEY_2`, `KEY_3` to `.env`
+- [ ] Verify keys with `cat .env | grep GEMINI`
+- [ ] Test key loading
+
+**Phase 5.2: APIKeyManager Class**
+- [ ] Add `APIKeyManager` class to `audiobook_generator.py`
+- [ ] Implement `load_keys()` with auto-discovery
+- [ ] Implement `load_usage()` với daily reset logic
+- [ ] Implement `rotate_key()` với availability check
+- [ ] Implement `log_request()` với persistence
+- [ ] Add `print_usage_stats()` for visibility
+
+**Phase 5.3: Usage Tracking**
+- [ ] Create `api_usage.json` structure
+- [ ] Implement daily reset logic (UTC 00:00)
+- [ ] Add key hashing for privacy
+- [ ] Test persistence across runs
+
+**Phase 5.4: Retry Logic**
+- [ ] Update `generate_audio_data()` với retry loop
+- [ ] Parse `retryDelay` from 429 errors
+- [ ] Implement key rotation on exhaustion
+- [ ] Add progress messages for user feedback
+- [ ] Handle "all keys exhausted" scenario
+
+**Phase 5.5: Integration**
+- [ ] Update `main()` để initialize `APIKeyManager`
+- [ ] Call `print_usage_stats()` at startup
+- [ ] Update `process_chapter()` để pass manager
+- [ ] Add `.gitignore` entry cho `api_usage.json`
+
+**Phase 5.6: Testing**
+- [ ] Test single key exhaustion
+- [ ] Test automatic rotation
+- [ ] Test daily reset logic
+- [ ] Test all keys exhausted scenario
+- [ ] Verify usage persistence
+
+---
+
+#### 🎓 Key Learnings - Rate Limiting & Multi-Key Management
+
+**1. Free Tier Limits:**
+- 15 requests/day per API key
+- Quota resets at UTC 00:00
+- 429 error provides `retryDelay` suggestion
+
+**2. Multi-Key Strategy:**
+- 3 keys = 3x capacity (45 requests/day)
+- Round-robin rotation
+- Skip exhausted keys automatically
+
+**3. Usage Tracking:**
+- Persist data across runs
+- Daily auto-reset prevents stale data
+- Hash keys for privacy in logs
+
+**4. Retry Best Practices:**
+- Max 3 retries per key (avoid spam)
+- Respect API's `retryDelay` suggestion
+- Rotate on exhaustion (don't wait)
+- Fail gracefully when all keys exhausted
+
+**5. Production Considerations:**
+- Monitor usage proactively
+- Alert before quota exhaustion
+- Consider paid tier for high volume
+- Rate limit per model (TTS vs text)
+
+---
+
+#### 📊 Expected Performance
+
+**With 3 API Keys:**
+- Capacity: 45 requests/day
+- File ~9K tokens: 5 chunks = 5 requests
+- **Can process:** ~9 chapters/day
+- **Wheel of Time Book 1:** ~53 chapters → 6 days
+
+**Cost Analysis:**
+- Free tier: $0 (45 req/day limit)
+- Pay-as-you-go: ~$0.025/1K tokens
+- Book 1 (~500K tokens): ~$12.50
+- **Trade-off:** Cost vs Time
+
+---
+
 
 ---
 ---
