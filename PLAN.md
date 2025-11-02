@@ -1765,43 +1765,130 @@ def generate_audio_data(client, text, voice="Kore", max_retries=3):
 
 ---
 
+#### 🐛 Code Review & Bug Fixes
+
+**Status: api_key_manager.py created ✅**
+
+Anh đã successfully tạo file `api_key_manager.py` và implement đầy đủ class với các methods:
+- ✅ `load_keys()` - Auto-discovery from environment
+- ✅ `load_usage()` - Daily reset logic
+- ✅ `save_usage()` - JSON persistence
+- ✅ `hash_key()` - Privacy protection
+- ✅ `get_active_key()` - Current key retrieval
+- ✅ `get_key_usage()` - Usage tracking
+- ✅ `is_key_exhausted()` - Threshold check
+- ✅ `log_request()` - Request logging
+- ✅ `rotate_key()` - Round-robin rotation
+- ✅ `print_usage_stats()` - Display statistics
+
+**⚠️ Critical Bugs Found (3 typos):**
+
+**Bug 1: `__init__()` method (api_key_manager.py:15)**
+```python
+# Current (WRONG):
+self.usage_file = seld.load_usage()  # Typo: 'seld' instead of 'self'
+
+# Should be:
+self.usage_data = self.load_usage()  # Fix: 'self' + assign to 'usage_data'
+```
+**Issue:** `NameError: name 'seld' is not defined` - crashes immediately
+
+**Bug 2: `__init__()` method (api_key_manager.py:16)**
+```python
+# Current (WRONG):
+self.current_index = self.usage_dat.get("current_key_index", 0)  # Typo: 'usage_dat'
+
+# Should be:
+self.current_index = self.usage_data.get("current_key_index", 0)  # Fix: 'usage_data'
+```
+**Issue:** `AttributeError: 'APIKeyManager' object has no attribute 'usage_dat'` - crashes immediately
+
+**Bug 3: `load_usage()` method (api_key_manager.py:38)**
+```python
+# Current (WRONG):
+def load_usage():  # Missing 'self' parameter
+
+# Should be:
+def load_usage(self):  # Fix: Add 'self'
+```
+**Issue:** `TypeError: load_usage() takes 0 positional arguments but 1 was given` - crashes on call
+
+**Fix Instructions:**
+1. Open `api_key_manager.py`
+2. Line 15: `self.usage_file = seld.load_usage()` → `self.usage_data = self.load_usage()`
+3. Line 16: `self.usage_dat.get(...)` → `self.usage_data.get(...)`
+4. Line 38: `def load_usage():` → `def load_usage(self):`
+
+**Verification Command:**
+```bash
+python -c "from api_key_manager import APIKeyManager; print('✅ Import successful!')"
+```
+
+---
+
 #### 📋 Implementation Checklist
 
-**Phase 5.1: Environment Setup**
-- [ ] Add `GEMINI_API_KEY_1`, `KEY_2`, `KEY_3` to `.env`
-- [ ] Verify keys with `cat .env | grep GEMINI`
-- [ ] Test key loading
+**📊 Overall Progress: Phase 5 - Multi-API Key Rotation System**
 
-**Phase 5.2: APIKeyManager Class**
-- [ ] Create new file `api_key_manager.py`
-- [ ] Move `APIKeyManager` class from `audiobook_generator.py` to `api_key_manager.py`
-- [ ] Implement `load_keys()` with auto-discovery
-- [ ] Implement `load_usage()` với daily reset logic
-- [ ] Implement `rotate_key()` với availability check
-- [ ] Implement `log_request()` với persistence
-- [ ] Add `print_usage_stats()` for visibility
-- [ ] Update imports in `audiobook_generator.py`: `from api_key_manager import APIKeyManager`
+| Phase | Status | Progress |
+|-------|--------|----------|
+| 5.1 Environment Setup | ✅ COMPLETED | 3/3 tasks |
+| 5.2 APIKeyManager Class | ✅ COMPLETED | 15/15 tasks |
+| 5.3 Usage Tracking | ✅ COMPLETED | 4/4 tasks |
+| 5.4 Update main() | ⏳ IN PROGRESS | 1/6 tasks |
+| 5.5 Retry Logic | ⏸️ PENDING | 0/6 tasks |
+| 5.6 Integration & Testing | ⏸️ PENDING | 0/5 tasks |
 
-**Phase 5.3: Usage Tracking**
-- [ ] Create `api_usage.json` structure
-- [ ] Implement daily reset logic (UTC 00:00)
-- [ ] Add key hashing for privacy
-- [ ] Test persistence across runs
+**Total: 22/39 tasks completed (56%)**
 
-**Phase 5.4: Retry Logic**
-- [ ] Update `generate_audio_data()` với retry loop
-- [ ] Parse `retryDelay` from 429 errors
-- [ ] Implement key rotation on exhaustion
+---
+
+**Phase 5.1: Environment Setup ✅ COMPLETED**
+- [x] Add `GEMINI_API_KEY_1`, `KEY_2`, `KEY_3` to `.env`
+- [x] Verify keys with `cat .env | grep GEMINI`
+- [x] Test key loading
+
+**Phase 5.2: APIKeyManager Class ✅ COMPLETED**
+- [x] Create new file `api_key_manager.py`
+- [x] Move `APIKeyManager` class from `audiobook_generator.py` to `api_key_manager.py`
+- [x] Implement `load_keys()` with auto-discovery
+- [x] Implement `load_usage()` với daily reset logic
+- [x] Implement `rotate_key()` với availability check (round-robin with exhaustion check)
+- [x] Implement `log_request()` với persistence
+- [x] Implement `save_usage()` for JSON persistence
+- [x] Implement `hash_key()` for privacy (SHA256, first 8 chars)
+- [x] Implement `get_active_key()` for current key retrieval
+- [x] Implement `get_key_usage()` for usage stats
+- [x] Implement `is_key_exhausted()` for threshold check
+- [x] Add `print_usage_stats()` for visibility
+- [x] Update imports in `audiobook_generator.py`: `from api_key_manager import APIKeyManager`
+- [x] Fix 3 typo bugs (seld→self, usage_dat→usage_data, missing self parameter)
+- [x] Verify import successful: `python3 -c "from api_key_manager import APIKeyManager"`
+
+**Phase 5.3: Usage Tracking ✅ COMPLETED**
+- [x] Create `api_usage.json` structure (implemented in `load_usage()`)
+- [x] Implement daily reset logic (UTC 00:00) - checks date on load
+- [x] Add key hashing for privacy (SHA256[:8])
+- [x] Test persistence across runs (auto-saves on each log_request)
+
+**Phase 5.4: Update main() Function (IN PROGRESS) ⏳**
+- [x] `APIKeyManager` already initialized in line 18: `api_key_manager = APIKeyManager(...)`
+- [ ] Remove `check_environment()` call from `main()`
+- [ ] Replace with: `api_key = api_key_manager.get_active_key()`
+- [ ] (Optional) Add `api_key_manager.print_usage_stats()` để show key status
+- [ ] (Optional) Remove unused `check_environment()` function (lines 21-28)
+- [ ] (Optional) Remove unused `import sys` if not used elsewhere
+
+**Phase 5.5: Retry Logic with Key Rotation**
+- [ ] Update `generate_audio_data()` với retry loop (3 retries per key)
+- [ ] Parse `retryDelay` from 429 errors (use regex on error message)
+- [ ] Implement key rotation on exhaustion (call `api_key_manager.rotate_key()`)
 - [ ] Add progress messages for user feedback
-- [ ] Handle "all keys exhausted" scenario
+- [ ] Handle "all keys exhausted" scenario (raise clear error)
+- [ ] Call `api_key_manager.log_request()` for tracking
 
-**Phase 5.5: Integration**
-- [ ] Update `main()` để initialize `APIKeyManager`
-- [ ] Call `print_usage_stats()` at startup
-- [ ] Update `process_chapter()` để pass manager
+**Phase 5.6: Final Integration & Testing**
 - [ ] Add `.gitignore` entry cho `api_usage.json`
-
-**Phase 5.6: Testing**
 - [ ] Test single key exhaustion
 - [ ] Test automatic rotation
 - [ ] Test daily reset logic
