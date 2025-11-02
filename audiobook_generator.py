@@ -1,5 +1,6 @@
 import os
 import re
+import time
 import wave
 from pathlib import Path
 
@@ -7,6 +8,7 @@ import tiktoken
 from dotenv import load_dotenv
 from google import genai
 from google.genai import types
+from google.genai.errors import ClientError
 
 from api_key_manager import APIKeyManager
 
@@ -93,44 +95,111 @@ def save_wav_file(filename, pcm_data, channels=1, rate=24000, sample_width=2):
         wf.writeframes(pcm_data)  # Write PCM data
 
 
-def generate_audio_data(client, text, voice="Kore"):
-    response = client.models.generate_content(
-        model="gemini-2.5-flash-preview-tts",
-        contents=text,
-        config=types.GenerateContentConfig(
-            response_modalities=["AUDIO"],
-            speech_config=types.SpeechConfig(
-                voice_config=types.VoiceConfig(
-                    prebuilt_voice_config=types.PrebuiltVoiceConfig(
-                        voice_name=voice,
-                    )
+def generate_audio_data(client, text, voice="Kore", max_retries=3):
+    """
+    Generate audio with automatic retry and key rotation
+
+    Args:
+        client: genai.Client instance (will be recreated on key rotation)
+        text: Text to convert
+        voice: Voice name
+        max_retries: Max retries per key
+
+    Returns:
+        bytes: Audio data
+    """
+    global api_key_manager  # Access global manager
+
+    attempt = 0
+    keys_tried = 0
+    max_keys = len(api_key_manager.keys)
+
+    while keys_tried < max_keys:
+        current_key = api_key_manager.get_active_key()
+
+        for attempt in range(max_retries):
+            try:
+                # Recreate client with current key
+                client = genai.Client(api_key=current_key)
+                response = client.models.generate_content(
+                    model="gemini-2.5-flash-preview-tts",
+                    contents=text,
+                    config=types.GenerateContentConfig(
+                        response_modalities=["AUDIO"],
+                        speech_config=types.SpeechConfig(
+                            voice_config=types.VoiceConfig(
+                                prebuilt_voice_config=types.PrebuiltVoiceConfig(
+                                    voice_name=voice,
+                                )
+                            )
+                        ),
+                    ),
                 )
-            ),
-        ),
-    )
 
-    # Extract ALL audio parts (not just parts[0]!)
-    parts = response.candidates[0].content.parts
-    all_audio_parts = []
+                # Extract ALL audio parts (not just parts[0]!)
+                parts = response.candidates[0].content.parts
+                all_audio_parts = []
 
-    print(f"   📦 API trả về {len(parts)} parts")
+                print(f"   📦 API trả về {len(parts)} parts")
 
-    for i, part in enumerate(parts, 1):
-        if hasattr(part, "inline_data") and part.inline_data:
-            audio_data = part.inline_data.data
-            all_audio_parts.append(audio_data)
-            print(f"      Part {i}: {len(audio_data):,} bytes")
+                for i, part in enumerate(parts, 1):
+                    if hasattr(part, "inline_data") and part.inline_data:
+                        audio_data = part.inline_data.data
+                        all_audio_parts.append(audio_data)
+                        print(f"      Part {i}: {len(audio_data):,} bytes")
+                    else:
+                        print(f"      Part {i}: No audio data (text part?)")
+
+                if len(all_audio_parts) == 0:
+                    raise ValueError("No audio data found in API response!")
+
+                # Concatenate all parts
+                final_audio = b"".join(all_audio_parts)
+                print(f"   ✅ Tổng audio: {len(final_audio):,} bytes")
+
+                # Log successful request
+                api_key_manager.log_request(current_key, success=True)
+
+                return final_audio
+
+            except ClientError as e:
+                # Check if 429 Rate Limit error
+                if e.status_code == 429:
+                    # Parse retry delay from error
+                    retry_delay = 30  # Default 30s
+                    if "retrydelay" in str(e):
+                        # Extract delay: "retry in 27.591s" -> 27
+
+                        match = re.search(r"(\d+)\.?\d*s", str(e))
+                        if match:
+                            retry_delay = int(float(match.group(1))) + 1
+
+                    # Log failed request
+                    api_key_manager.log_request(
+                        current_key, success=False, error=str(e)
+                    )
+
+                    if attempt < max_retries - 1:
+                        print(
+                            f"   ⏳ Rate limit hit, retry #{attempt + 1} sau {retry_delay}s..."
+                        )
+                        time.sleep(retry_delay)
+                    else:
+                        print(f"   ❌ Key exhausted after {max_retries} retries")
+                        break  # try next key
+                else:
+                    # Other errors - don't retry
+                    raise
+
+        # Current key failed all retries, try next key
+        keys_tried += 1
+        if keys_tried < max_keys:
+            if not api_key_manager.rotate_key():
+                raise Exception("All API keys exhausted!")
         else:
-            print(f"      Part {i}: No audio data (text part?)")
+            raise Exception("All API keys failed after retries!")
 
-    if len(all_audio_parts) == 0:
-        raise ValueError("No audio data found in API response!")
-
-    # Concatenate all parts
-    final_audio = b"".join(all_audio_parts)
-    print(f"   ✅ Tổng audio: {len(final_audio):,} bytes")
-
-    return final_audio
+    raise Exception("Failed to generate audio after trying all keys!")
 
 
 def process_chapter(client, file_path, voice="Kore"):
@@ -213,14 +282,14 @@ def process_chapter(client, file_path, voice="Kore"):
 
 def main():
     print("--- Bắt đầu quá trình tạo sách nói ---")
-    api_key = check_environment()
+    api_key = api_key_manager.get_active_key()
 
     client = genai.Client(api_key=api_key)
     print("\n--- Môi trường đã sẵn sàng! ---")
 
     # === TEST PHASE 4: Chunking Support ===
     test_file = os.path.expanduser(
-        "/Users/tttv/Library/Mobile Documents/com~apple~CloudDocs/Ebook/Robert Jordan/The Complete Wheel of Time (422)/B1-CH22.md"
+        "/Users/tttv/Library/Mobile Documents/com~apple~CloudDocs/Ebook/Robert Jordan/The Complete Wheel of Time (422)/B2/B2-CH01.md"
     )
     success = process_chapter(client, test_file, voice="Kore")
 
