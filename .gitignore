@@ -208,3 +208,6 @@ __marimo__/
 
 # Output audio files
 *.wav
+
+# API JSON
+api_usage.json
