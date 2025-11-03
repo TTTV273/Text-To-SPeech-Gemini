@@ -1,6 +1,6 @@
 # Text-To-Speech-Gemini
 
-A production-ready audiobook generator using Google's Gemini 2.5 TTS API with advanced features including multi-API key rotation, concurrent processing, and intelligent error recovery.
+A production-ready audiobook generator using Google's Gemini 2.5 TTS API with advanced features including multi-API key rotation, concurrent processing, intelligent error recovery, and checkpoint-based resume.
 
 ## 🎯 Project Overview
 
@@ -9,7 +9,7 @@ Convert Markdown chapters into high-quality audiobook files (`.wav`) using Googl
 **Key Highlights:**
 - ⚡ **Concurrent processing** with ThreadPoolExecutor for 2-3× speed improvement
 - 🔄 **Multi-API key rotation** supporting up to 7 keys with automatic quota management
-- 💾 **Partial save** preserves completed chunks on errors (no data loss)
+- 💾 **Resume feature** automatically resumes from checkpoint (91% quota savings!) ⭐ NEW!
 - 🎙️ **30 prebuilt voices** with natural language control
 - 🔒 **Thread-safe** quota tracking and key assignment
 - 📊 **Real-time progress tracking** with detailed metrics
@@ -87,6 +87,45 @@ uv run audiobook_generator.py chapter.md --concurrent --workers 7
 - Concurrent: 30 minutes
 - **Saves 50 minutes per book!** ⚡
 
+### 🔄 Resume Mode (NEW - Phase 8)
+
+Resume from checkpoint when processing fails mid-chapter:
+
+```bash
+# Resume from last checkpoint (skip completed chunks)
+uv run audiobook_generator.py chapter.md --concurrent --resume
+
+# Works with any worker count
+uv run audiobook_generator.py chapter.md --concurrent --workers 5 --resume
+```
+
+**How it works:**
+1. Processing fails mid-chapter (e.g., 10/11 chunks complete)
+2. System saves checkpoint (`.checkpoint_*.json`) and partial audio
+3. Run again with `--resume` flag
+4. Only processes missing chunks (91% API quota savings!)
+5. Merges existing + new audio automatically
+6. Cleans up checkpoint on success
+
+**Example scenario:**
+```
+Day 1: Process B2-CH05 (11 chunks)
+  → 10/11 complete, chunk 11 fails (quota exhausted)
+  → Saved: B2-CH05_PARTIAL.wav (99MB) + checkpoint
+
+Day 2: Resume with --resume flag
+  → Loads existing 10 chunks from partial file
+  → Only processes chunk 11 (1 API request)
+  → Saves 10 API requests (91% quota savings!)
+  → Final: B2-CH05.wav (complete)
+```
+
+**Benefits:**
+- **Quota savings:** 91% reduction for B2-CH05 example (11 → 1 request)
+- **Time savings:** 89% faster (180s → 20s)
+- **Automatic validation:** SHA256 file hash prevents processing modified files
+- **Safe fallback:** Invalid checkpoint → full processing
+
 ---
 
 ## 🎙️ Voice Options
@@ -125,6 +164,14 @@ Choose from 30 prebuilt voices:
 - **Order preservation:** Chunks assembled in correct sequence
 - **Configurable workers:** 1-7 workers (recommend 3-5 for optimal performance)
 
+### Phase 8: Resume Feature ✅ NEW!
+- **Checkpoint system:** Automatically saves progress when processing fails
+- **Smart resume:** Only processes missing chunks (91% quota savings!)
+- **File validation:** SHA256 hash prevents processing modified files
+- **Auto-merge:** Combines existing + new audio seamlessly
+- **Auto-cleanup:** Removes checkpoint files on successful completion
+- **CLI flag:** Simple `--resume` flag to enable resume mode
+
 ### Core Features:
 - **Smart chunking:** Automatically splits long texts (>2000 tokens)
 - **Markdown cleaning:** Removes headers, bold, italic, links, code blocks
@@ -144,10 +191,16 @@ your-book/
 ├── B2-CH01.md
 ├── B2-CH02.md
 └── TTS/
-    ├── B2-CH01.wav          # Complete file
-    ├── B2-CH01_PARTIAL.wav  # Partial save (if error occurred)
+    ├── B2-CH01.wav                 # Complete file
+    ├── B2-CH01_PARTIAL.wav         # Partial save (if error occurred)
+    ├── .checkpoint_B2-CH01.json    # Resume checkpoint (auto-deleted on success)
     └── B2-CH02.wav
 ```
+
+**File types:**
+- `.wav` - Final complete audio file
+- `_PARTIAL.wav` - Partial progress (when processing fails mid-chapter)
+- `.checkpoint_*.json` - Resume checkpoint (hidden, auto-cleaned up)
 
 ---
 
@@ -305,7 +358,8 @@ time uv run audiobook_generator.py chapter.md  # Compare with sync
 - Phase 1-4: Basic TTS + chunking support
 - Phase 5: Multi-API key rotation
 - Phase 6: Error recovery + partial save
-- Phase 7: Concurrent processing (current)
+- Phase 7: Concurrent processing
+- Phase 8: Resume feature (current) ⭐ NEW!
 
 **API Documentation:** [Gemini TTS API](https://ai.google.dev/gemini-api/docs/models/gemini)
 
@@ -339,4 +393,4 @@ Created by [@TTTV273](https://github.com/TTTV273)
 
 ---
 
-**Last Updated:** 2025-11-03 (Phase 7: Concurrent Processing Complete)
+**Last Updated:** 2025-11-03 (Phase 8: Resume Feature Complete)
