@@ -1,7 +1,9 @@
 import os
 import re
+import threading
 import time
 import wave
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 import tiktoken
@@ -478,23 +480,257 @@ def process_chapter(client, file_path, voice="Kore"):
         return False
 
 
+def process_chapter_concurrent(client, file_path, voice="Kore", max_workers=3):
+    """
+    Process chapter with concurrent chunk processing.
+
+    Args:
+        client: Gemini client (not used, each thread creates own client)
+        file_path: Path to markdown file
+        voice: Voice name for TTS
+        max_workers: Number of concurrent workers (default: 3)
+
+    Returns:
+        bool: True if successful, False otherwise
+    """
+    global api_key_manager
+
+    try:
+        # Step 1: Parse paths
+        input_path = Path(file_path)
+        parent_dir = input_path.parent
+        output_dir = parent_dir / "TTS"
+        output_filename = input_path.stem + ".wav"
+        output_path = output_dir / output_filename
+
+        print(f"\n{'='*60}")
+        print(f"🎯 Processing Chapter: {input_path.name}")
+        print(f"⚡ Concurrent Mode: {max_workers} workers")
+        print(f"{'='*60}\n")
+
+        # Step 2: Create output directory
+        output_dir.mkdir(exist_ok=True)
+
+        # Step 3: Read and clean text
+        with open(input_path, "r", encoding="utf-8") as f:
+            markdown_text = f.read()
+
+        clean_text = clean_markdown(markdown_text)
+        total_tokens = count_tokens(clean_text)
+
+        # Step 4: Split into chunks
+        if total_tokens > 2000:
+            text_chunks = split_into_chunks(clean_text, max_tokens=2000)
+        else:
+            text_chunks = [clean_text]
+
+        total_chunks = len(text_chunks)
+
+        print(f"📊 Chapter Info:")
+        print(f"   Total chunks: {total_chunks}")
+        print(f"   Total tokens: {total_tokens:,}")
+        print(f"   Expected API calls: {total_chunks}")
+        print(f"   Estimated time (sequential): {total_chunks * 20}s")
+        print(
+            f"   Estimated time (concurrent): {(total_chunks / max_workers) * 20:.0f}s ⚡"
+        )
+        print()
+
+        # Thread-safe results storage
+        results = {}
+        results_lock = threading.Lock()
+
+        # Progress tracking
+        progress_lock = threading.Lock()
+        completed_count = [0]  # Use list for mutable counter
+
+        def process_single_chunk(chunk_id, chunk_text):
+            """Process a single chunk (runs in thread)"""
+            nonlocal results, results_lock, completed_count, progress_lock
+
+            try:
+                # Get assigned API key for this chunk (round-robin)
+                assigned_key = api_key_manager.get_key_for_chunk(chunk_id)
+
+                # Create client with assigned key
+                chunk_client = genai.Client(api_key=assigned_key)
+
+                # Generate audio (with retry logic)
+                audio_data = generate_audio_data(
+                    chunk_client, chunk_text, voice=voice
+                )
+
+                # Store result (thread-safe)
+                with results_lock:
+                    results[chunk_id] = audio_data
+
+                # Update progress (thread-safe)
+                with progress_lock:
+                    completed_count[0] += 1
+                    print(
+                        f"✅ Chunk {chunk_id + 1}/{total_chunks} completed ({completed_count[0]}/{total_chunks})"
+                    )
+
+                return audio_data
+
+            except Exception as e:
+                print(f"❌ Error processing chunk {chunk_id + 1}: {e}")
+                with results_lock:
+                    results[chunk_id] = None  # Mark as failed
+                raise
+
+        # Step 5: Concurrent processing
+        print(f"⏳ Starting concurrent processing with {max_workers} workers...\n")
+
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            # Submit all chunks
+            future_to_chunk = {
+                executor.submit(process_single_chunk, i, chunk): i
+                for i, chunk in enumerate(text_chunks)
+            }
+
+            # Wait for all to complete
+            for future in as_completed(future_to_chunk):
+                chunk_id = future_to_chunk[future]
+                try:
+                    future.result()  # Raises exception if chunk failed
+                except Exception as e:
+                    print(f"❌ Chunk {chunk_id + 1} failed: {e}")
+                    # Continue processing other chunks
+
+        # Step 6: Check for failed chunks
+        failed_chunks = [i for i, data in results.items() if data is None]
+        if failed_chunks:
+            print(
+                f"\n❌ {len(failed_chunks)} chunk(s) failed: {[i+1 for i in failed_chunks]}"
+            )
+
+            # Partial save of successful chunks
+            successful_chunks = {
+                i: data for i, data in results.items() if data is not None
+            }
+            if successful_chunks:
+                partial_audio = b"".join(
+                    [successful_chunks[i] for i in sorted(successful_chunks.keys())]
+                )
+                partial_filename = output_filename.replace(".wav", "_PARTIAL.wav")
+                partial_path = output_dir / partial_filename
+                save_wav_file(str(partial_path), partial_audio)
+
+                print(
+                    f"\n💾 Saved partial progress ({len(successful_chunks)}/{total_chunks} chunks):"
+                )
+                print(f"   File: {partial_path}")
+                print(
+                    f"   Size: {len(partial_audio):,} bytes ({len(partial_audio)/1024/1024:.2f} MB)"
+                )
+
+            return False
+
+        # Step 7: Assemble chunks in order
+        print(f"\n🔧 Assembling {total_chunks} chunks in order...")
+        all_audio_parts = [results[i] for i in sorted(results.keys())]
+
+        # Step 8: Combine and save
+        final_audio = b"".join(all_audio_parts)
+        save_wav_file(str(output_path), final_audio)
+
+        # Success message
+        print(f"\n{'='*60}")
+        print(f"✅ Success! Audio saved to: {output_path}")
+        print(f"   Chunks: {len(all_audio_parts)}")
+        print(
+            f"   Size: {len(final_audio):,} bytes ({len(final_audio)/1024/1024:.2f} MB)"
+        )
+        print(f"{'='*60}\n")
+
+        return True
+
+    except FileNotFoundError:
+        print(f"❌ Error: File not found {file_path}")
+        return False
+
+    except Exception as e:
+        print(f"\n❌ Error in concurrent processing: {e}")
+        import traceback
+
+        traceback.print_exc()
+        return False
+
+
 def main():
-    print("--- Bắt đầu quá trình tạo sách nói ---")
-    api_key = api_key_manager.get_active_key()
+    import argparse
+    import sys
 
-    client = genai.Client(api_key=api_key)
-    print("\n--- Môi trường đã sẵn sàng! ---")
-
-    # === TEST PHASE 4: Chunking Support ===
-    test_file = os.path.expanduser(
-        "/Users/tttv/Library/Mobile Documents/com~apple~CloudDocs/Ebook/Robert Jordan/The Complete Wheel of Time (422)/B2/B2-CH02.md"
+    parser = argparse.ArgumentParser(
+        description="Generate audiobook from markdown using Gemini TTS"
     )
-    success = process_chapter(client, test_file, voice="Kore")
+    parser.add_argument("file", nargs="?", help="Markdown file to process")
+    parser.add_argument("--voice", default="Kore", help="Voice name (default: Kore)")
 
-    if success:
-        print("\n🎉 Phase 4 test PASSED!")
+    # Concurrent processing flags
+    parser.add_argument(
+        "--concurrent",
+        action="store_true",
+        help="Enable concurrent processing (faster)",
+    )
+    parser.add_argument(
+        "--workers",
+        type=int,
+        default=3,
+        help="Number of concurrent workers (default: 3, max: 7)",
+    )
+
+    args = parser.parse_args()
+
+    # Validate workers
+    if args.workers > 7:
+        print("⚠️  Warning: Max workers is 7 (number of API keys). Setting to 7.")
+        args.workers = 7
+    if args.workers < 1:
+        print("⚠️  Warning: Min workers is 1. Setting to 1.")
+        args.workers = 1
+
+    # Print header
+    print("\n" + "=" * 60)
+    print("🎙️  Gemini TTS Audiobook Generator")
+    print("=" * 60)
+
+    # Load API keys
+    global api_key_manager
+    api_key_manager.print_usage_stats()
+
+    # Create client (for synchronous mode)
+    client = genai.Client(api_key=api_key_manager.get_active_key())
+
+    # Get file to process
+    if args.file:
+        file_path = args.file
     else:
-        print("\n❌ Phase 4 test FAILED!")
+        # Default test file
+        file_path = "2.DATA/BOOK-2_Learn-Python/B2-CH02.md"
+        print(f"\n📝 No file specified, using default: {file_path}")
+
+    # Process with concurrent or synchronous mode
+    if args.concurrent:
+        print(
+            f"\n⚡ Using CONCURRENT mode with {args.workers} workers (Phase 7 - NEW!)\n"
+        )
+        success = process_chapter_concurrent(
+            client, file_path, voice=args.voice, max_workers=args.workers
+        )
+    else:
+        print(
+            f"\n📝 Using SYNCHRONOUS mode (use --concurrent for faster processing)\n"
+        )
+        success = process_chapter(client, file_path, voice=args.voice)
+
+    # Final result
+    if success:
+        print("\n🎉 Processing complete!")
+    else:
+        print("\n❌ Processing failed!")
+        sys.exit(1)
 
 
 if __name__ == "__main__":

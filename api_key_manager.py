@@ -1,6 +1,7 @@
 import hashlib
 import json
 import os
+import threading
 from datetime import datetime
 from pathlib import Path
 
@@ -14,6 +15,9 @@ class APIKeyManager:
         self.keys = self.load_keys()
         self.usage_data = self.load_usage()
         self.current_index = self.usage_data.get("current_key_index", 0)
+
+        # Thread safety for concurrent processing
+        self.lock = threading.Lock()
 
     def load_keys(self):
         """Load all numbered API keys from environment"""
@@ -78,49 +82,87 @@ class APIKeyManager:
         return self.get_key_usage(key) >= self.threshold
 
     def log_request(self, key, success=True, error=None):
-        """log API request for a key"""
-        key_hash = self.hash_key(key)
+        """log API request for a key (thread-safe)"""
+        with self.lock:
+            key_hash = self.hash_key(key)
 
-        if key_hash not in self.usage_data["keys"]:
-            self.usage_data["keys"][key_hash] = {
-                "requests": 0,
-                "last_error": None,
-                "last_used": None,
-            }
+            if key_hash not in self.usage_data["keys"]:
+                self.usage_data["keys"][key_hash] = {
+                    "requests": 0,
+                    "last_error": None,
+                    "last_used": None,
+                }
 
-        self.usage_data["keys"][key_hash]["requests"] += 1
-        self.usage_data["keys"][key_hash]["last_used"] = datetime.now().isoformat()
+            self.usage_data["keys"][key_hash]["requests"] += 1
+            self.usage_data["keys"][key_hash]["last_used"] = datetime.now().isoformat()
 
-        if error:
-            self.usage_data["keys"][key_hash]["last_error"] = datetime.now().isoformat()
+            if error:
+                self.usage_data["keys"][key_hash]["last_error"] = datetime.now().isoformat()
 
-        self.save_usage()
+            self.save_usage()
 
     def rotate_key(self):
-        """Switch to next available key"""
-        original_index = self.current_index
-        attempts = 0
+        """Switch to next available key (thread-safe)"""
+        with self.lock:
+            original_index = self.current_index
+            attempts = 0
 
-        while attempts < len(self.keys):
-            self.current_index = (self.current_index + 1) % len(self.keys)
-            current_key = self.keys[self.current_index]
+            while attempts < len(self.keys):
+                self.current_index = (self.current_index + 1) % len(self.keys)
+                current_key = self.keys[self.current_index]
 
-            if not self.is_key_exhausted(current_key):
-                key_hash = self.hash_key(current_key)
-                usage = self.get_key_usage(current_key)
-                print(
-                    f"🔄 Rotated to Key #{self.current_index + 1} ({key_hash}): {usage}/{self.threshold + 1} requests"
-                )
+                if not self.is_key_exhausted(current_key):
+                    key_hash = self.hash_key(current_key)
+                    usage = self.get_key_usage(current_key)
+                    print(
+                        f"🔄 Rotated to Key #{self.current_index + 1} ({key_hash}): {usage}/{self.threshold + 1} requests"
+                    )
 
-                self.usage_data["current_key_index"] = self.current_index
-                self.save_usage()
-                return True
+                    self.usage_data["current_key_index"] = self.current_index
+                    self.save_usage()
+                    return True
 
-            attempts += 1
+                attempts += 1
 
-        # All keys exhausted
-        print("❌ All API keys exhausted! Please wait for quota reset.")
-        return False
+            # All keys exhausted
+            print("❌ All API keys exhausted! Please wait for quota reset.")
+            return False
+
+    def get_key_for_chunk(self, chunk_id):
+        """
+        Round-robin key assignment for concurrent processing (thread-safe)
+
+        Args:
+            chunk_id: Chunk index (0-based)
+
+        Returns:
+            API key string
+
+        Raises:
+            Exception: If all keys are exhausted
+        """
+        with self.lock:
+            # Assign keys in round-robin fashion
+            key_index = chunk_id % len(self.keys)
+            assigned_key = self.keys[key_index]
+
+            # Check if key is exhausted
+            if self.is_key_exhausted(assigned_key):
+                # Find next available key
+                for i in range(len(self.keys)):
+                    test_key = self.keys[(key_index + i) % len(self.keys)]
+                    if not self.is_key_exhausted(test_key):
+                        key_hash = self.hash_key(test_key)
+                        usage = self.get_key_usage(test_key)
+                        print(
+                            f"   🔑 Chunk {chunk_id + 1}: Using Key #{(key_index + i) % len(self.keys) + 1} ({key_hash}): {usage}/{self.threshold + 1} requests"
+                        )
+                        return test_key
+
+                # All keys exhausted
+                raise Exception("All API keys exhausted!")
+
+            return assigned_key
 
     def print_usage_stats(self):
         """Display current usage statistics"""
