@@ -2091,3 +2091,683 @@ def generate_audio_data(text: str) -> bytes:
 - Kết hợp tất cả các thành phần trong `process_chapter`.
 - Thêm xử lý lỗi đầy đủ và thông báo tiến trình chi tiết.
 - Test toàn diện với một file chapter thật.
+---
+
+## 🐛 Phase 6: Bug Fix & Resilience Improvements (2025-11-02)
+
+### 📋 Problem Statement
+
+**Bug Discovered in Production:**
+```
+AttributeError: 'ClientError' object has no attribute 'status_code'
+```
+
+**Context:**
+- Processing B2-CH01.md (22,454 tokens → 12 chunks)
+- Successfully completed chunks 1-6 (57.6 MB audio)
+- Failed at chunk 7/12 with 429 RESOURCE_EXHAUSTED
+- **Critical Issue**: Lost all progress (chunks 1-6) due to error handling bug
+
+**Root Causes:**
+1. **Incorrect ClientError attribute access**: Assumed `status_code` exists, but Google's genai library uses different structure
+2. **No partial save mechanism**: When mid-chapter failure occurs, all completed chunks are discarded
+3. **No resume capability**: Cannot continue from last successful chunk
+
+---
+
+### 🔍 Phase 6.1: ClientError Structure Analysis
+
+**Investigation Needed:**
+
+From error traceback:
+```python
+google.genai.errors.ClientError: 429 RESOURCE_EXHAUSTED. {'error': {'code': 429, 'message': '...', 'status': 'RESOURCE_EXHAUSTED', ...}}
+```
+
+**Task for Developer:**
+Inspect ClientError object to find correct way to check error code.
+
+**Complete Debug Code to Add (audiobook_generator.py line 165-171):**
+
+```python
+            except ClientError as e:
+                # 🔍 DEBUG: Inspect ClientError structure
+                print(f"\n{'='*60}")
+                print(f"🔍 DEBUG: ClientError Inspection")
+                print(f"{'='*60}")
+                print(f"Type: {type(e)}")
+                print(f"\nString representation:")
+                print(f"{str(e)[:500]}")
+
+                print(f"\nAvailable attributes (non-private):")
+                attrs = [x for x in dir(e) if not x.startswith('_')]
+                for attr in attrs:
+                    try:
+                        value = getattr(e, attr)
+                        if not callable(value):
+                            print(f"  - {attr}: {type(value).__name__} = {repr(value)[:100]}")
+                    except:
+                        pass
+
+                print(f"\n{'='*60}")
+                print("Testing 4 methods to detect 429:")
+                print(f"{'='*60}")
+
+                # Method 1: String-based check
+                method1 = "429" in str(e) or "RESOURCE_EXHAUSTED" in str(e)
+                print(f"  Method 1 (string check): {method1}")
+                print(f"    - '429' in str(e): {'429' in str(e)}")
+                print(f"    - 'RESOURCE_EXHAUSTED' in str(e): {'RESOURCE_EXHAUSTED' in str(e)}")
+
+                # Method 2: hasattr status_code
+                method2_has = hasattr(e, 'status_code')
+                method2 = method2_has and e.status_code == 429
+                print(f"  Method 2 (status_code attr): {method2}")
+                print(f"    - hasattr(e, 'status_code'): {method2_has}")
+                if method2_has:
+                    print(f"    - e.status_code: {e.status_code}")
+
+                # Method 3: hasattr code
+                method3_has = hasattr(e, 'code')
+                method3 = method3_has and e.code == 429
+                print(f"  Method 3 (code attr): {method3}")
+                print(f"    - hasattr(e, 'code'): {method3_has}")
+                if method3_has:
+                    print(f"    - e.code: {e.code}")
+
+                # Method 4: Parse error dict
+                method4 = False
+                method4_has_error = hasattr(e, 'error')
+                print(f"  Method 4 (error dict): {method4}")
+                print(f"    - hasattr(e, 'error'): {method4_has_error}")
+                if method4_has_error:
+                    try:
+                        error_dict = e.error
+                        print(f"    - e.error type: {type(error_dict)}")
+                        print(f"    - e.error: {error_dict}")
+                        if hasattr(error_dict, 'get'):
+                            method4 = error_dict.get('code') == 429
+                            print(f"    - e.error.get('code'): {error_dict.get('code')}")
+                    except Exception as parse_err:
+                        print(f"    - Error parsing: {parse_err}")
+
+                print(f"\n{'='*60}")
+                working_methods = [i for i, m in enumerate([method1, method2, method3, method4], 1) if m]
+                print(f"✅ Working methods: {working_methods}")
+                print(f"{'='*60}\n")
+
+                # Use Method 1 for now (safest fallback)
+                if method1:
+                    # Parse retry delay from error
+                    retry_delay = 30  # Default 30s
+                    if "retrydelay" in str(e).lower():
+                        # Extract delay: "retry in 27.591s" -> 27
+                        match = re.search(r"(\d+)\.?\d*s", str(e))
+                        if match:
+                            retry_delay = int(float(match.group(1))) + 1
+```
+
+**Expected Output When 429 Error Occurs:**
+```
+============================================================
+🔍 DEBUG: ClientError Inspection
+============================================================
+Type: <class 'google.genai.errors.ClientError'>
+
+String representation:
+429 RESOURCE_EXHAUSTED. {'error': {'code': 429, 'message': '...', 'status': 'RESOURCE_EXHAUSTED', ...}}
+
+Available attributes (non-private):
+  - code: int = 429
+  - message: str = '...'
+  - status: str = 'RESOURCE_EXHAUSTED'
+  ...
+
+============================================================
+Testing 4 methods to detect 429:
+============================================================
+  Method 1 (string check): True
+    - '429' in str(e): True
+    - 'RESOURCE_EXHAUSTED' in str(e): True
+  Method 2 (status_code attr): False
+    - hasattr(e, 'status_code'): False
+  Method 3 (code attr): True
+    - hasattr(e, 'code'): True
+    - e.code: 429
+  Method 4 (error dict): True
+    - hasattr(e, 'error'): True
+    - e.error type: <class 'dict'>
+    - e.error: {'code': 429, 'message': '...', 'status': 'RESOURCE_EXHAUSTED'}
+    - e.error.get('code'): 429
+
+============================================================
+✅ Working methods: [1, 3, 4]
+============================================================
+```
+
+**Next Steps After Running Debug:**
+1. Run test with B2-CH01.md to trigger 429 error at chunk 7
+2. Analyze debug output to confirm which methods work
+3. Choose the most reliable method for Phase 6.2 fix
+4. Document findings for future reference
+
+---
+
+### 🔍 Phase 6.1b: Response Structure Investigation (2025-11-02 Update)
+
+**New Issue Discovered:**
+When running test with B2-CH01.md, encountered different error at chunk 7:
+```
+AttributeError: 'NoneType' object has no attribute 'parts'
+```
+
+**Error Location:** `audiobook_generator.py:144`
+```python
+parts = response.candidates[0].content.parts  # ❌ content is None!
+```
+
+**Root Cause:**
+- API call did NOT raise ClientError (so debug code didn't trigger)
+- API returned success but `response.candidates[0].content` is `None`
+- This is a "silent failure" - likely due to rate limit soft-fail or safety filters
+- Code assumes response structure is always valid
+
+**Complete Debug Code to Add (audiobook_generator.py line 138-143):**
+
+```python
+                )
+
+                # 🔍 DEBUG: Inspect response structure before accessing parts
+                print(f"\n{'='*60}")
+                print(f"🔍 DEBUG: Response Structure Inspection")
+                print(f"{'='*60}")
+                print(f"Response type: {type(response)}")
+                print(f"hasattr(response, 'candidates'): {hasattr(response, 'candidates')}")
+
+                if hasattr(response, 'candidates'):
+                    if response.candidates:
+                        print(f"len(response.candidates): {len(response.candidates)}")
+                        candidate = response.candidates[0]
+                        print(f"candidates[0] type: {type(candidate)}")
+                        print(f"hasattr(candidates[0], 'content'): {hasattr(candidate, 'content')}")
+                        print(f"candidates[0].content type: {type(candidate.content)}")
+                        print(f"candidates[0].content value: {candidate.content}")
+
+                        if candidate.content is None:
+                            print(f"\n❌ WARNING: content is None!")
+                            print(f"This indicates API soft-fail (rate limit or safety filter)")
+
+                            # Check for other response fields
+                            if hasattr(response, 'prompt_feedback'):
+                                print(f"prompt_feedback: {response.prompt_feedback}")
+                            if hasattr(candidate, 'finish_reason'):
+                                print(f"finish_reason: {candidate.finish_reason}")
+                            if hasattr(candidate, 'safety_ratings'):
+                                print(f"safety_ratings: {candidate.safety_ratings}")
+
+                            # Print full response for investigation
+                            print(f"\nFull response object:")
+                            print(f"{response}")
+                    else:
+                        print(f"❌ WARNING: response.candidates is empty!")
+                        print(f"Full response: {response}")
+                else:
+                    print(f"❌ WARNING: response has no 'candidates' attribute!")
+                    print(f"Available attributes: {[x for x in dir(response) if not x.startswith('_')]}")
+
+                print(f"{'='*60}\n")
+
+                # Defensive check before accessing parts
+                if not response.candidates:
+                    raise ValueError(f"API returned no candidates! Full response: {response}")
+
+                if response.candidates[0].content is None:
+                    # Check if it's a rate limit issue
+                    candidate = response.candidates[0]
+                    error_msg = f"API returned empty content (soft-fail)."
+
+                    if hasattr(candidate, 'finish_reason'):
+                        error_msg += f" Finish reason: {candidate.finish_reason}"
+                    if hasattr(response, 'prompt_feedback'):
+                        error_msg += f" Prompt feedback: {response.prompt_feedback}"
+
+                    raise ValueError(error_msg)
+
+                # Extract ALL audio parts (not just parts[0]!)
+                parts = response.candidates[0].content.parts
+```
+
+**Expected Debug Output When Chunk 7 Fails:**
+```
+============================================================
+🔍 DEBUG: Response Structure Inspection
+============================================================
+Response type: <class 'google.genai.types.GenerateContentResponse'>
+hasattr(response, 'candidates'): True
+len(response.candidates): 1
+candidates[0] type: <class 'google.genai.types.Candidate'>
+hasattr(candidates[0], 'content'): True
+candidates[0].content type: <class 'NoneType'>
+candidates[0].content value: None
+
+❌ WARNING: content is None!
+This indicates API soft-fail (rate limit or safety filter)
+finish_reason: STOP / SAFETY / RECITATION / OTHER
+prompt_feedback: {...}
+safety_ratings: [...]
+
+Full response object:
+GenerateContentResponse(candidates=[...], prompt_feedback=...)
+============================================================
+
+ValueError: API returned empty content (soft-fail). Finish reason: STOP
+```
+
+**Defensive Pattern (Recommended):**
+After investigation, update line 144 with defensive extraction:
+```python
+# Defensive check for response structure
+if not response.candidates:
+    raise ValueError(f"API returned no candidates! Response: {response}")
+
+candidate = response.candidates[0]
+if candidate.content is None:
+    # Collect diagnostic info
+    error_msg = "API returned empty content"
+    if hasattr(candidate, 'finish_reason'):
+        error_msg += f" (finish_reason: {candidate.finish_reason})"
+    raise ValueError(error_msg)
+
+# Safe to access parts now
+parts = candidate.content.parts
+```
+
+**Why This Happens:**
+1. **Rate Limit Soft-Fail:** API quota exceeded but returns 200 OK with empty content instead of 429 error
+2. **Safety Filters:** Content blocked by safety mechanisms
+3. **Recitation Detection:** Content flagged as potential copyright violation
+4. **Other API Issues:** Network glitches, service degradation
+
+**Integration with Phase 6.1 (ClientError Debug):**
+- Phase 6.1 handles explicit errors (ClientError exceptions)
+- Phase 6.1b handles implicit errors (empty responses)
+- Both are needed for comprehensive error handling
+
+**✅ Test Results (2025-11-02):**
+
+Test with B2-CH01.md (20,805 tokens → 11 chunks):
+- ✅ Chunks 1-6 succeeded (64 MB total)
+- ❌ Chunk 7 failed with empty content
+
+**Debug Output Analysis:**
+```
+Chunk 7:
+  candidates[0].content type: <class 'NoneType'>
+  candidates[0].content value: None
+  finish_reason: FinishReason.OTHER
+  prompt_feedback: None
+  safety_ratings: None
+  usage_metadata: prompt_token_count=1120, total_token_count=1120
+```
+
+**Confirmed Root Cause:**
+1. **Soft-fail rate limit:** API quota exceeded (15 requests used, chunk 7 is request #15)
+2. **No ClientError raised:** API returns 200 OK with empty content instead of 429 error
+3. **finish_reason = OTHER:** Confirms rate limit (not SAFETY/RECITATION)
+4. **Usage metadata present:** API accepted request but didn't generate audio
+5. **Critical: Chunks 1-6 (64 MB) LOST** when chunk 7 failed
+
+**Implications for Phase 6.2 & 6.3:**
+- Need to detect `finish_reason=OTHER` with empty content as rate limit
+- Partial Save (Phase 6.3) is CRITICAL to preserve completed chunks
+- Should treat empty content with OTHER as retriable error (rotate key)
+
+---
+
+### 🔧 Phase 6.2: Fix ClientError Bug
+
+**File:** `audiobook_generator.py`
+
+**Current Code (Line 167 - BROKEN):**
+```python
+except ClientError as e:
+    # Check if 429 Rate Limit error
+    if e.status_code == 429:  # ❌ AttributeError!
+```
+
+**Fix Strategy:**
+
+**Option A: String-based check (Safest)**
+```python
+except ClientError as e:
+    # Check if 429 Rate Limit error (check string representation)
+    error_str = str(e)
+    if "429" in error_str or "RESOURCE_EXHAUSTED" in error_str:
+```
+
+**Option B: Try multiple methods (Robust)**
+```python
+except ClientError as e:
+    # Check if 429 Rate Limit error
+    is_rate_limit = False
+    
+    # Try different methods to detect 429
+    if hasattr(e, 'status_code') and e.status_code == 429:
+        is_rate_limit = True
+    elif "429" in str(e) or "RESOURCE_EXHAUSTED" in str(e):
+        is_rate_limit = True
+    
+    if is_rate_limit:
+```
+
+**Recommended:** Option A (simple, reliable)
+
+---
+
+### 💾 Phase 6.3: Partial Save Implementation
+
+**Goal:** Save completed chunks even when later chunks fail.
+
+**Real Example from Test:**
+- B2-CH01.md: 11 chunks
+- Chunks 1-6 succeeded (64 MB)
+- Chunk 7 failed → **64 MB LOST!** 😭
+
+**Design:**
+
+**Current Flow (audiobook_generator.py:376-384):**
+```python
+for i, chunk in enumerate(text_chunks, 1):
+    print(f"\n🎙️  Đang xử lý chunk {i}/{len(text_chunks)}...")
+    print(f"   Chunk size: {count_tokens(chunk):,} tokens")
+
+    audio_part = generate_audio_data(client, chunk, voice=voice)
+    all_audio_parts.append(audio_part)  # ← Store in memory only!
+    total_bytes += len(audio_part)
+
+    print(f"   ✅ Chunk {i} hoàn thành: {len(audio_part):,} bytes")
+
+# If any chunk fails → exception → all_audio_parts lost!
+```
+
+**Problem:**
+- `all_audio_parts` is in-memory list
+- Exception in chunk 7 → function exits → chunks 1-6 lost
+- No recovery possible
+
+**New Flow (Partial Save):**
+```
+1. Process chunk 1 → success → Store in memory + Save to disk ✅
+2. Process chunk 2 → success → Store in memory + Save to disk ✅
+...
+6. Process chunk 6 → success → Store in memory + Save to disk ✅
+7. Process chunk 7 → FAIL ❌
+   → Exception raised
+   → Memory cleared
+   → Chunks 1-6 PRESERVED on disk ✅
+   → Can resume from chunk 7 later
+```
+
+---
+
+**Implementation Strategy:**
+
+**Option 1: Save Each Chunk Individually**
+- **Pros:** Easy resume, can delete chunks if needed
+- **Cons:** More disk I/O, many small files
+
+```python
+# Location: audiobook_generator.py:376-384
+# Modify the for loop
+
+for i, chunk in enumerate(text_chunks, 1):
+    print(f"\n🎙️  Đang xử lý chunk {i}/{len(text_chunks)}...")
+    print(f"   Chunk size: {count_tokens(chunk):,} tokens")
+
+    audio_part = generate_audio_data(client, chunk, voice=voice)
+    all_audio_parts.append(audio_part)
+    total_bytes += len(audio_part)
+
+    # NEW: Save intermediate chunk
+    chunk_filename = output_path.stem + f"_chunk{i:03d}.wav"
+    chunk_path = output_dir / chunk_filename
+    save_wav_file(str(chunk_path), audio_part)
+    print(f"   💾 Saved intermediate: {chunk_filename}")
+
+    print(f"   ✅ Chunk {i} hoàn thành: {len(audio_part):,} bytes")
+```
+
+**Output when chunk 7 fails:**
+```
+TTS/
+  B2-CH01_chunk001.wav  (10.4 MB) ✅
+  B2-CH01_chunk002.wav  (10.0 MB) ✅
+  B2-CH01_chunk003.wav  (11.6 MB) ✅
+  B2-CH01_chunk004.wav  (10.5 MB) ✅
+  B2-CH01_chunk005.wav  (11.1 MB) ✅
+  B2-CH01_chunk006.wav  (10.1 MB) ✅
+  (chunk 7 fails but 1-6 preserved!)
+```
+
+---
+
+**Option 2: Save Partial Final File (Simpler - RECOMMENDED)**
+- **Pros:** Single file, less disk I/O, simpler
+- **Cons:** Must process from beginning if resume
+
+```python
+# Location: audiobook_generator.py:402-411
+# Modify the except Exception block in process_chapter()
+
+def process_chapter(client, file_path, voice="Kore"):
+    try:
+        # ... existing setup code (lines 337-375) ...
+
+        # Step 5: Generate audio for each chunk
+        all_audio_parts = []
+        total_bytes = 0
+
+        for i, chunk in enumerate(text_chunks, 1):
+            # ... existing chunk processing (lines 376-384) ...
+            audio_part = generate_audio_data(client, chunk, voice=voice)
+            all_audio_parts.append(audio_part)
+            total_bytes += len(audio_part)
+            print(f"   ✅ Chunk {i} hoàn thành: {len(audio_part):,} bytes")
+
+        # ... existing final save code (lines 386-399) ...
+
+    except FileNotFoundError:
+        print(f"❌ Lỗi: Không tìm thấy file {file_path}")
+        return False
+
+    except Exception as e:
+        # NEW: Save partial progress before re-raising
+        if all_audio_parts:  # Have some completed chunks
+            partial_filename = output_filename.replace('.wav', '_PARTIAL.wav')
+            partial_path = output_dir / partial_filename
+            partial_audio = b"".join(all_audio_parts)
+            save_wav_file(str(partial_path), partial_audio)
+            print(f"\n💾 Saved partial progress ({len(all_audio_parts)}/{len(text_chunks)} chunks): {partial_path}")
+            print(f"   Total saved: {len(partial_audio):,} bytes ({len(partial_audio)/1024/1024:.2f} MB)")
+
+        print(f"❌ Lỗi khi xử lý {file_path}: {e}")
+        import traceback
+        traceback.print_exc()
+        return False
+```
+
+**Output when chunk 7 fails:**
+```
+💾 Saved partial progress (6/11 chunks): TTS/B2-CH01_PARTIAL.wav
+   Total saved: 63,641,230 bytes (60.70 MB)
+```
+
+**Complete Implementation Code (Option 2 - RECOMMENDED):**
+
+```python
+# Replace audiobook_generator.py:402-411 with:
+
+    except FileNotFoundError:
+        print(f"❌ Lỗi: Không tìm thấy file {file_path}")
+        return False
+
+    except Exception as e:
+        # Partial Save: Preserve completed chunks before exiting
+        try:
+            if 'all_audio_parts' in locals() and all_audio_parts:
+                partial_filename = output_filename.replace('.wav', '_PARTIAL.wav')
+                partial_path = output_dir / partial_filename
+                partial_audio = b"".join(all_audio_parts)
+                save_wav_file(str(partial_path), partial_audio)
+
+                print(f"\n💾 Saved partial progress ({len(all_audio_parts)}/{len(text_chunks)} chunks):")
+                print(f"   File: {partial_path}")
+                print(f"   Size: {len(partial_audio):,} bytes ({len(partial_audio)/1024/1024:.2f} MB)")
+                print(f"   ℹ️  You can listen to completed chunks while investigating the error.")
+        except Exception as save_error:
+            print(f"⚠️  Warning: Failed to save partial progress: {save_error}")
+
+        print(f"\n❌ Lỗi khi xử lý {file_path}: {e}")
+        import traceback
+        traceback.print_exc()
+        return False
+```
+
+**Why Option 2 is Recommended:**
+1. ✅ Simpler code (just modify except block)
+2. ✅ Single file easier to manage
+3. ✅ Less disk I/O
+4. ✅ Can listen to partial audio immediately
+5. ✅ Handles edge case: `all_audio_parts` might not exist if error before loop
+
+---
+
+### 🔄 Phase 6.4: Resume Capability (Optional - Advanced)
+
+**Goal:** Resume processing from last successful chunk.
+
+**Implementation:**
+
+**Checkpoint File Structure:**
+```json
+{
+  "file": "B2-CH01.md",
+  "total_chunks": 12,
+  "completed_chunks": 6,
+  "last_chunk_index": 6,
+  "output_dir": "/path/to/TTS/",
+  "timestamp": "2025-11-02T13:17:00"
+}
+```
+
+**Resume Logic:**
+```python
+def process_chapter(client, file_path, voice="Kore", resume=False):
+    checkpoint_file = output_dir / ".checkpoint.json"
+    start_chunk = 0
+    
+    if resume and checkpoint_file.exists():
+        with open(checkpoint_file) as f:
+            checkpoint = json.load(f)
+        start_chunk = checkpoint['last_chunk_index']
+        print(f"🔄 Resuming from chunk {start_chunk + 1}/{len(text_chunks)}")
+    
+    for i in range(start_chunk, len(text_chunks)):
+        chunk = text_chunks[i]
+        # ... process chunk ...
+        
+        # Update checkpoint after each chunk
+        save_checkpoint(checkpoint_file, i + 1, len(text_chunks))
+```
+
+**Note:** This is advanced feature, implement only if needed frequently.
+
+---
+
+### 📋 Implementation Checklist
+
+**Phase 6.1: Investigation ✅**
+- [ ] Add debug code to inspect ClientError structure
+- [ ] Run test to trigger 429 error
+- [ ] Document correct method to check error code
+- [ ] Update PLAN.md with findings
+
+**Phase 6.2: Fix ClientError Bug** 
+- [ ] Replace `e.status_code` with correct check (line 167)
+- [ ] Test error handling with mock 429 error
+- [ ] Verify retry logic triggers correctly
+- [ ] Verify key rotation triggers correctly
+
+**Phase 6.3: Add Partial Save**
+- [ ] Choose Option 1 (individual chunks) or Option 2 (partial final)
+- [ ] Implement save logic in except block
+- [ ] Test partial save by forcing mid-chapter failure
+- [ ] Verify partial audio file plays correctly
+
+**Phase 6.4: Resume (Optional)**
+- [ ] Design checkpoint file format
+- [ ] Implement checkpoint save/load
+- [ ] Add `--resume` flag to CLI
+- [ ] Test resume from chunk 7 scenario
+
+**Phase 6.5: Testing**
+- [ ] Test with small file (2 chunks) - force fail at chunk 2
+- [ ] Test with medium file (5 chunks) - force fail at chunk 3
+- [ ] Test with large file (12 chunks) - force fail at chunk 7 (real scenario)
+- [ ] Verify all partial saves work
+- [ ] Verify audio quality of partial files
+
+---
+
+### 🎯 Success Criteria
+
+**Bug Fix:**
+- ✅ No more `AttributeError` when 429 occurs
+- ✅ Retry logic triggers correctly
+- ✅ Key rotation works as expected
+
+**Resilience:**
+- ✅ When chunk 7/12 fails, chunks 1-6 are saved
+- ✅ Saved partial file plays correctly
+- ✅ Clear message tells user where partial file is
+- ✅ User can manually resume or retry later
+
+**User Experience:**
+- ✅ Clear error messages
+- ✅ Progress not lost on failures
+- ✅ Easy to identify partial vs complete files
+
+---
+
+### 📊 Expected Outcomes
+
+**Before Phase 6:**
+- ❌ Chunk 7/12 fails → lose all 57.6 MB of chunks 1-6
+- ❌ Must restart entire chapter from chunk 1
+- ❌ Wasted API quota (6 requests)
+
+**After Phase 6:**
+- ✅ Chunk 7/12 fails → save 57.6 MB as `B2-CH01_PARTIAL.wav`
+- ✅ Can manually retry just chunks 7-12 later
+- ✅ API quota preserved (only retry failed chunks)
+- ✅ Clear path forward for user
+
+---
+
+### 🎓 Key Learnings
+
+**1. Library-Specific Error Handling:**
+- Never assume error object structure
+- Always inspect exceptions from third-party libraries
+- Use defensive programming (hasattr, try-except)
+
+**2. Resilience Patterns:**
+- **Partial Results**: Save intermediate progress
+- **Checkpointing**: Enable resume from failure point
+- **Idempotency**: Allow safe retries
+
+**3. User Experience:**
+- Losing hours of progress is unacceptable
+- Clear error messages with actionable next steps
+- Preserve user's work whenever possible
+
