@@ -9,16 +9,15 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 from pathlib import Path
 
-import tiktoken
 from dotenv import load_dotenv
 from google import genai
 from google.genai import types
 from google.genai.errors import ClientError
 
 from api_key_manager import APIKeyManager
+from text_chunker import count_tokens, split_into_chunks
 
-# Setup encoding
-ENCODING = tiktoken.get_encoding("cl100k_base")
+# Note: Token counting and chunking functions are now in text_chunker.py
 
 load_dotenv()
 api_key_manager = APIKeyManager(usage_file="api_usage.json", threshold=14)
@@ -47,49 +46,6 @@ def clean_markdown(text: str) -> str:
     text = re.sub(r"!\[([^\]]*)\]\([^\)]+\)", "", text)
 
     return text
-
-
-def count_tokens(text: str) -> int:
-    """Count token in text"""
-    return len(ENCODING.encode(text))
-
-
-def split_into_chunks(text: str, max_tokens: int = 20000) -> list[str]:
-    """Split text into token-safe chunks"""
-    chunks = []
-    current_chunk = []
-    current_token_count = 0
-
-    # Split by paragraphs (double newline)
-    paragraphs = text.split("\n\n")
-
-    for para in paragraphs:
-        para = para.strip()
-        if not para:
-            continue
-
-        # Count tokens for this paragraph
-        para_tokens = count_tokens(para)
-
-        # Check if adding this para would exceed limit
-        if current_token_count + para_tokens > max_tokens:
-            # Finalize current chunk
-            if current_chunk:
-                chunks.append("\n\n".join(current_chunk))
-
-                # Start new chunk with this paragraph
-                current_chunk = [para]
-                current_token_count = para_tokens
-        else:
-            # Add to current chunk
-            current_chunk.append(para)
-            current_token_count += para_tokens
-
-    # Add final chunk
-    if current_chunk:
-        chunks.append("\n\n".join(current_chunk))
-
-    return chunks
 
 
 # ============================================================
