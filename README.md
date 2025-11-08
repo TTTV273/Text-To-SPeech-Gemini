@@ -1,6 +1,6 @@
 # Text-To-Speech-Gemini
 
-A production-ready audiobook generator using Google's Gemini 2.5 TTS API with advanced features including multi-API key rotation, concurrent processing, intelligent error recovery, and checkpoint-based resume.
+A production-ready audiobook generator using Google's Gemini 2.5 TTS API with advanced features including multi-API key rotation, concurrent processing, intelligent 3-level text chunking, error recovery, and checkpoint-based resume.
 
 ## 🎯 Project Overview
 
@@ -164,7 +164,7 @@ Choose from 30 prebuilt voices:
 - **Order preservation:** Chunks assembled in correct sequence
 - **Configurable workers:** 1-7 workers (recommend 3-5 for optimal performance)
 
-### Phase 8: Resume Feature ✅ NEW!
+### Phase 8: Resume Feature ✅
 - **Checkpoint system:** Automatically saves progress when processing fails
 - **Smart resume:** Only processes missing chunks (91% quota savings!)
 - **File validation:** SHA256 hash prevents processing modified files
@@ -172,13 +172,23 @@ Choose from 30 prebuilt voices:
 - **Auto-cleanup:** Removes checkpoint files on successful completion
 - **CLI flag:** Simple `--resume` flag to enable resume mode
 
+### Phase 9: Text Chunker Refactor ✅ NEW!
+- **3-level intelligent splitting:** Paragraph → Sentence → Word hierarchy
+- **Bug fix:** Fixed critical indentation bug causing 0 chunks for large files
+- **Modular design:** Separate `text_chunker.py` module for reusability
+- **Comprehensive testing:** 6 unit tests covering all edge cases
+- **Smart sentence detection:** Regex-based sentence boundary detection
+- **Logging support:** DEBUG/INFO/WARNING levels for troubleshooting
+- **Handles edge cases:** Large paragraphs (>2000 tokens), no paragraph breaks, Vietnamese text
+
 ### Core Features:
-- **Smart chunking:** Automatically splits long texts (>2000 tokens)
+- **Intelligent chunking:** 3-level splitting (paragraph/sentence/word) with edge case handling
 - **Markdown cleaning:** Removes headers, bold, italic, links, code blocks
 - **Token counting:** Uses tiktoken for accurate token estimation
 - **WAV output:** 16-bit PCM, 24kHz, mono format
 - **Progress tracking:** Real-time updates for concurrent processing
 - **CLI interface:** User-friendly command-line arguments
+- **Modular architecture:** Separate modules for chunking, API management, TTS generation
 
 ---
 
@@ -359,7 +369,8 @@ time uv run audiobook_generator.py chapter.md  # Compare with sync
 - Phase 5: Multi-API key rotation
 - Phase 6: Error recovery + partial save
 - Phase 7: Concurrent processing
-- Phase 8: Resume feature (current) ⭐ NEW!
+- Phase 8: Resume feature
+- Phase 9: Text chunker refactor (current) ⭐ NEW!
 
 **API Documentation:** [Gemini TTS API](https://ai.google.dev/gemini-api/docs/models/gemini)
 
@@ -393,4 +404,4 @@ Created by [@TTTV273](https://github.com/TTTV273)
 
 ---
 
-**Last Updated:** 2025-11-03 (Phase 8: Resume Feature Complete)
+**Last Updated:** 2025-11-08 (Phase 9: Text Chunker Refactor Complete)
