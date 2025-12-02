@@ -161,6 +161,7 @@ Choose from 30 prebuilt voices:
 
 ### Phase 7: Concurrent Processing ✅
 - **ThreadPoolExecutor:** Process multiple chunks simultaneously
+- **Intelligent Load Balancing:** Dynamic distribution strategy that spreads chunks evenly across ALL available keys, preventing "hotspot" bottlenecks.
 - **Round-robin key assignment:** Distribute load evenly across all keys
 - **Thread-safe quota management:** Lock-based synchronization
 - **Order preservation:** Chunks assembled in correct sequence
@@ -299,16 +300,12 @@ If processing fails mid-chapter, completed chunks are automatically saved:
 
 ### Key Assignment Strategy
 
-**Round-robin distribution:**
-```
-Chunk 0 → Key 0
-Chunk 1 → Key 1
-Chunk 2 → Key 2
-...
-Chunk 7 → Key 0 (wrap around)
-```
+**Smart Dynamic Distribution:**
+1. **Filter:** Identify all currently available (non-exhausted) keys.
+2. **Distribute:** Assign chunks using `chunk_id % available_keys_count`.
+3. **Benefit:** Prevents the "thundering herd" problem where all workers flock to the single next available key, ensuring even load distribution across all remaining quota.
 
-**Fallback:** If assigned key is exhausted, find next available key
+**Fallback:** If assigned key is exhausted during processing, automatically rotate to next available key.
 
 ---
 
@@ -406,4 +403,4 @@ Created by [@TTTV273](https://github.com/TTTV273)
 
 ---
 
-**Last Updated:** 2025-12-02 (API Key Management and Error Handling Improvements)
+**Last Updated:** 2025-12-02 (Improved Load Balancing & API Key Management)

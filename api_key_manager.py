@@ -131,6 +131,7 @@ class APIKeyManager:
     def get_key_for_chunk(self, chunk_id):
         """
         Round-robin key assignment for concurrent processing (thread-safe)
+        Improved logic: Distributes load evenly among ALL available keys.
 
         Args:
             chunk_id: Chunk index (0-based)
@@ -142,25 +143,37 @@ class APIKeyManager:
             Exception: If all keys are exhausted
         """
         with self.lock:
-            # Assign keys in round-robin fashion
-            key_index = chunk_id % len(self.keys)
-            assigned_key = self.keys[key_index]
+            # 1. Identify all available (non-exhausted) keys
+            available_keys = []
+            for i, key in enumerate(self.keys):
+                if not self.is_key_exhausted(key):
+                    available_keys.append((i, key))
 
-            # Check if key is exhausted
-            if self.is_key_exhausted(assigned_key):
-                # Find next available key
-                for i in range(len(self.keys)):
-                    test_key = self.keys[(key_index + i) % len(self.keys)]
-                    if not self.is_key_exhausted(test_key):
-                        key_hash = self.hash_key(test_key)
-                        usage = self.get_key_usage(test_key)
-                        print(
-                            f"   🔑 Chunk {chunk_id + 1}: Using Key #{(key_index + i) % len(self.keys) + 1} ({key_hash}): {usage}/{self.threshold + 1} requests"
-                        )
-                        return test_key
-
-                # All keys exhausted
+            if not available_keys:
                 raise Exception("All API keys exhausted!")
+
+            # 2. Distribute chunks evenly among AVAILABLE keys
+            # This prevents the "bottleneck effect" where all chunks flock to the single next available key
+            target_index = chunk_id % len(available_keys)
+            key_index, assigned_key = available_keys[target_index]
+            
+            key_hash = self.hash_key(assigned_key)
+            usage = self.get_key_usage(assigned_key)
+            
+            # Only log if we are doing a re-assignment (i.e., the "natural" key was exhausted)
+            # Or just always log for clarity in debug mode? Let's keep it clean but informative.
+            # The caller prints the chunk start, but we can print a subtle info if it's a "smart" assignment.
+            
+            # Check if this was the "natural" assignment
+            natural_index = chunk_id % len(self.keys)
+            if key_index != natural_index:
+                 print(
+                    f"   twisted_rightwards_arrows Chunk {chunk_id + 1}: Re-routed to Key #{key_index + 1} ({key_hash}): {usage}/{self.threshold + 1} requests"
+                )
+            else:
+                 print(
+                    f"   🔑 Chunk {chunk_id + 1}: Using Key #{key_index + 1} ({key_hash}): {usage}/{self.threshold + 1} requests"
+                )
 
             return assigned_key
 
