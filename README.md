@@ -42,7 +42,7 @@ Create a `.env` file with your Gemini API keys:
 GEMINI_API_KEY_1=your_first_key_here
 GEMINI_API_KEY_2=your_second_key_here
 GEMINI_API_KEY_3=your_third_key_here
-# ... up to GEMINI_API_KEY_7
+# ... GEMINI_API_KEY_N (where N is the key number, e.g., GEMINI_API_KEY_8, GEMINI_API_KEY_9, etc.)
 ```
 
 **Get API keys:** https://aistudio.google.com/app/apikey
@@ -146,13 +146,15 @@ Choose from 30 prebuilt voices:
 ## ✨ Features
 
 ### Phase 5: Multi-API Key Rotation ✅
-- Supports up to 7 API keys with automatic rotation
+- Supports any number of API keys (GEMINI_API_KEY_1, GEMINI_API_KEY_2, ...) with automatic rotation
+- **Bug Fix:** Correctly assigns and utilizes individual keys for concurrent workers, significantly reducing `Rate Limit` and `Model Overloaded` errors.
 - Intelligent quota management (15 requests/day per key)
 - Daily usage tracking in `api_usage.json`
 - Automatic fallback when keys are exhausted
 
 ### Phase 6: Error Recovery ✅
 - **Soft-fail detection:** Handles both explicit errors (429) and implicit failures (empty content)
+- **Enhanced Retry Logic:** Now includes robust retries for `503 UNAVAILABLE` (`Model Overloaded`) server errors, improving resilience during high API load.
 - **Partial save:** Preserves completed chunks if processing fails mid-chapter
 - **Automatic retry:** 3 retries per key with exponential backoff
 - **Graceful degradation:** Save what you can, report what failed
@@ -404,4 +406,4 @@ Created by [@TTTV273](https://github.com/TTTV273)
 
 ---
 
-**Last Updated:** 2025-11-08 (Phase 9: Text Chunker Refactor Complete)
+**Last Updated:** 2025-12-02 (API Key Management and Error Handling Improvements)

@@ -34,7 +34,7 @@ def clean_markdown(text: str) -> str:
     text = re.sub(r"\*([^*]+)\*", r"\1", text)
 
     # clean Link
-    text = re.sub(r"\[([^\]]+)\]\([^\)]+\)", r"\1", text)
+    text = re.sub(r"!\[([^\]]+)\]\([^\]]+\)", r"\1", text)
 
     # clean Code Block
     text = re.sub(r"```[^`]*```", "", text, flags=re.DOTALL)
@@ -43,14 +43,14 @@ def clean_markdown(text: str) -> str:
     text = re.sub(r"`([^`]+)`", r"\1", text)
 
     # clean image
-    text = re.sub(r"!\[([^\]]*)\]\([^\)]+\)", "", text)
+    text = re.sub(r"!\[([^\]]*)\]\([^\]]+\)", "", text)
 
     return text
 
 
-# ============================================================
+# ============================================================ 
 # Checkpoint Functions (Phase 8: Resume Feature)
-# ============================================================
+# ============================================================ 
 
 
 def calculate_file_hash(file_path):
@@ -62,8 +62,13 @@ def calculate_file_hash(file_path):
     return sha256.hexdigest()
 
 
+def get_chunk_path(output_dir, file_stem, chunk_id):
+    """Get path for an individual chunk file"""
+    return output_dir / f".chunk_{chunk_id}_{file_stem}.wav"
+
+
 def save_checkpoint(
-    output_dir, file_path, total_chunks, completed_chunks, partial_audio_file, voice="Kore"
+    output_dir, file_path, total_chunks, completed_chunks, voice="Kore"
 ):
     """
     Save checkpoint after completed chunks
@@ -73,7 +78,6 @@ def save_checkpoint(
         file_path: Source markdown file path
         total_chunks: Total number of chunks
         completed_chunks: List of completed chunk IDs
-        partial_audio_file: Filename of partial audio
         voice: Voice name used
 
     Returns:
@@ -85,16 +89,9 @@ def save_checkpoint(
         "file_hash": calculate_file_hash(file_path),
         "total_chunks": total_chunks,
         "completed_chunks": sorted(completed_chunks),
-        "failed_chunks": [],
-        "partial_audio_file": partial_audio_file,
-        "partial_audio_size": (
-            Path(output_dir / partial_audio_file).stat().st_size
-            if (output_dir / partial_audio_file).exists()
-            else 0
-        ),
         "timestamp": datetime.now().isoformat(),
         "voice": voice,
-        "version": "1.0",
+        "version": "2.0",
     }
 
     checkpoint_file = output_dir / f".checkpoint_{Path(file_path).stem}.json"
@@ -130,7 +127,7 @@ def load_checkpoint(output_dir, file_path):
 
 def verify_checkpoint(checkpoint, file_path, output_dir):
     """
-    Verify checkpoint is still valid (file not modified, partial audio exists)
+    Verify checkpoint is valid and all claimed chunk files exist
 
     Args:
         checkpoint: Checkpoint data dict
@@ -138,75 +135,62 @@ def verify_checkpoint(checkpoint, file_path, output_dir):
         output_dir: Output directory path
 
     Returns:
-        Tuple (is_valid: bool, message: str)
+        Tuple (is_valid: bool, valid_chunks: list, message: str)
     """
     if not checkpoint:
-        return False, "No checkpoint found"
+        return False, [], "No checkpoint found"
 
     # Check if source file still exists
     if not Path(file_path).exists():
-        return False, "Source file no longer exists"
+        return False, [], "Source file no longer exists"
 
     # Check if file hash matches
     current_hash = calculate_file_hash(file_path)
     if current_hash != checkpoint.get("file_hash"):
-        return False, "Source file has been modified since checkpoint"
-
-    # Check if partial audio file exists
-    partial_filename = checkpoint.get("partial_audio_file", "")
-    partial_file = output_dir / partial_filename
-    if not partial_file.exists():
-        return False, f"Partial audio file not found: {partial_filename}"
+        return False, [], "Source file has been modified since checkpoint"
 
     # Check if completed_chunks list is valid
-    if not isinstance(checkpoint.get("completed_chunks"), list):
-        return False, "Invalid checkpoint format: completed_chunks not a list"
+    completed_chunks = checkpoint.get("completed_chunks")
+    if not isinstance(completed_chunks, list):
+        return False, [], "Invalid checkpoint format"
 
-    return True, "Checkpoint valid"
+    # Verify individual chunk files exist
+    file_stem = Path(file_path).stem
+    valid_chunks = []
+    missing_chunks = []
+
+    for chunk_id in completed_chunks:
+        chunk_path = get_chunk_path(output_dir, file_stem, chunk_id)
+        if chunk_path.exists() and chunk_path.stat().st_size > 0:
+            valid_chunks.append(chunk_id)
+        else:
+            missing_chunks.append(chunk_id)
+
+    if missing_chunks:
+        print(f"⚠️  Warning: {len(missing_chunks)} chunk files missing from checkpoint")
+
+    if not valid_chunks:
+        return False, [], "No valid chunk files found"
+
+    return True, valid_chunks, f"Checkpoint valid ({len(valid_chunks)} chunks)"
 
 
-def load_partial_audio(partial_audio_path):
-    """
-    Load existing partial audio data from WAV file
-
-    Args:
-        partial_audio_path: Path to partial WAV file
-
-    Returns:
-        Raw PCM audio data as bytes
-    """
-    with wave.open(str(partial_audio_path), "rb") as wf:
-        # Read all frames as raw PCM data
-        audio_data = wf.readframes(wf.getnframes())
-
-    return audio_data
-
-
-# ============================================================
+# ============================================================ 
 # WAV File Operations
-# ============================================================
+# ============================================================ 
 
 
 def save_wav_file(filename, pcm_data, channels=1, rate=24000, sample_width=2):
-    with wave.open(filename, "wb") as wf:
+    with wave.open(str(filename), "wb") as wf:
         wf.setnchannels(channels)  # Mono
         wf.setsampwidth(sample_width)  # 16-bit
         wf.setframerate(rate)  # 24kHz
         wf.writeframes(pcm_data)  # Write PCM data
 
 
-def generate_audio_data(client, text, voice="Kore", max_retries=3):
+def generate_audio_data(client, text, voice="Kore", max_retries=3, initial_key=None):
     """
     Generate audio with automatic retry and key rotation
-
-    Args:
-        client: genai.Client instance (will be recreated on key rotation)
-        text: Text to convert
-        voice: Voice name
-        max_retries: Max retries per key
-
-    Returns:
-        bytes: Audio data
     """
     global api_key_manager  # Access global manager
 
@@ -215,7 +199,10 @@ def generate_audio_data(client, text, voice="Kore", max_retries=3):
     max_keys = len(api_key_manager.keys)
 
     while keys_tried < max_keys:
-        current_key = api_key_manager.get_active_key()
+        if keys_tried == 0 and initial_key:
+            current_key = initial_key
+        else:
+            current_key = api_key_manager.get_active_key()
 
         for attempt in range(max_retries):
             try:
@@ -235,114 +222,36 @@ def generate_audio_data(client, text, voice="Kore", max_retries=3):
                         ),
                     ),
                 )
+                
+                # Check candidates
+                if not hasattr(response, "candidates") or not response.candidates:
+                     raise ValueError(f"API returned no candidates! Full response: {response}")
 
-                # 🔍 DEBUG: Inspect response structure before accessing parts
-                print(f"\n{'='*60}")
-                print(f"🔍 DEBUG: Response Structure Inspection")
-                print(f"{'='*60}")
-                print(f"Response type: {type(response)}")
-                print(
-                    f"hasattr(response, 'candidates'): {hasattr(response, 'candidates')}"
-                )
-
-                if hasattr(response, "candidates"):
-                    if response.candidates:
-                        print(f"len(response.candidates): {len(response.candidates)}")
-                        candidate = response.candidates[0]
-                        print(f"candidates[0] type: {type(candidate)}")
-                        print(
-                            f"hasattr(candidates[0], 'content'): {hasattr(candidate, 'content')}"
-                        )
-                        print(f"candidates[0].content type: {type(candidate.content)}")
-                        print(f"candidates[0].content value: {candidate.content}")
-
-                        if candidate.content is None:
-                            print(f"\n❌ WARNING: content is None!")
-                            print(
-                                f"This indicates API soft-fail (rate limit or safety filter)"
-                            )
-
-                            # Check for other response fields
-                            if hasattr(response, "prompt_feedback"):
-                                print(f"prompt_feedback: {response.prompt_feedback}")
-                            if hasattr(candidate, "finish_reason"):
-                                print(f"finish_reason: {candidate.finish_reason}")
-                            if hasattr(candidate, "safety_ratings"):
-                                print(f"safety_ratings: {candidate.safety_ratings}")
-
-                            # Print full response for investigation
-                            print(f"\nFull response object:")
-                            print(f"{response}")
+                candidate = response.candidates[0]
+                if candidate.content is None:
+                    # Check finish_reason
+                    finish_reason = getattr(candidate, "finish_reason", "UNKNOWN")
+                    if "OTHER" in str(finish_reason):
+                         # Soft fail logic
+                         api_key_manager.log_request(current_key, success=False, error=f"Soft-fail: {finish_reason}")
+                         retry_delay = 30
+                         print(f"   ⏳ Rate limit soft-fail, retry #{attempt + 1} sau {retry_delay}s...")
+                         time.sleep(retry_delay)
+                         continue
                     else:
-                        print(f"❌ WARNING: response.candidates is empty!")
-                        print(f"Full response: {response}")
-                else:
-                    print(f"❌ WARNING: response has no 'candidates' attribute!")
-                    print(
-                        f"Available attributes: {[x for x in dir(response) if not x.startswith('_')]}"
-                    )
+                         raise ValueError(f"API blocked content: {finish_reason}")
 
-                print(f"{'='*60}\n")
-
-                # Defensive check before accessing parts
-                if not response.candidates:
-                    raise ValueError(
-                        f"API returned no candidates! Full response: {response}"
-                    )
-
-                if response.candidates[0].content is None:
-                    # Check if it's a rate limit issue
-                    candidate = response.candidates[0]
-
-                    # Check finish_reason to determine if retriable
-                    if hasattr(candidate, "finish_reason"):
-                        finish_reason = str(candidate.finish_reason)
-
-                        # Treat OTHER as rate limit soft-fail (retriable)
-                        if "OTHER" in finish_reason:
-                            print(
-                                f"   ⚠️  Rate limit soft-fail detected (finish_reason={finish_reason})"
-                            )
-
-                            # Log failed request
-                            api_key_manager.log_request(
-                                current_key,
-                                success=False,
-                                error=f"Soft-fail: {finish_reason}",
-                            )
-
-                            # Retry logic (same as 429 error)
-                            if attempt < max_retries - 1:
-                                retry_delay = 30  # Default 30s
-                                print(
-                                    f"   ⏳ Rate limit soft-fail, retry #{attempt + 1} sau {retry_delay}s..."
-                                )
-                                time.sleep(retry_delay)
-                                continue  # Continue retry loop
-                            else:
-                                print(
-                                    f"   ❌ Key exhausted after {max_retries} retries (soft-fail)"
-                                )
-                                break  # try next key
-                        else:
-                            # SAFETY, RECITATION, etc - not retriable
-                            error_msg = (
-                                f"API blocked content: finish_reason={finish_reason}"
-                            )
-                            if hasattr(response, "prompt_feedback"):
-                                error_msg += (
-                                    f", prompt_feedback={response.prompt_feedback}"
-                                )
-                            raise ValueError(error_msg)
-                    else:
-                        # No finish_reason - unknown error
-                        raise ValueError(f"API returned empty content (unknown reason)")
-
-                # Extract ALL audio parts (not just parts[0]!)
-                parts = response.candidates[0].content.parts
+                # Extract ALL audio parts
+                parts = candidate.content.parts
                 all_audio_parts = []
 
-                print(f"   📦 API trả về {len(parts)} parts")
+                # Get the index of the current key for logging
+                try:
+                    key_index = api_key_manager.keys.index(current_key) + 1
+                except ValueError:
+                    key_index = "?" # Fallback in case key is not found (shouldn't happen)
+
+                print(f"   📦 API#{key_index} trả về {len(parts)} parts")
 
                 for i, part in enumerate(parts, 1):
                     if hasattr(part, "inline_data") and part.inline_data:
@@ -352,7 +261,7 @@ def generate_audio_data(client, text, voice="Kore", max_retries=3):
                     else:
                         print(f"      Part {i}: No audio data (text part?)")
 
-                if len(all_audio_parts) == 0:
+                if not all_audio_parts:
                     raise ValueError("No audio data found in API response!")
 
                 # Concatenate all parts
@@ -364,111 +273,35 @@ def generate_audio_data(client, text, voice="Kore", max_retries=3):
 
                 return final_audio
 
-            except ClientError as e:
-                # 🔍 DEBUG: Inspect ClientError structure
-                print(f"\n{'='*60}")
-                print(f"🔍 DEBUG: ClientError Inspection")
-                print(f"{'='*60}")
-                print(f"Type: {type(e)}")
-                print(f"\nString reprentation:")
-                print(f"{str(e)[:500]}")
-
-                print(f"\nAvailable attributes (non-private):")
-                attrs = [x for x in dir(e) if not x.startswith("_")]
-                for attr in attrs:
-                    try:
-                        value = getattr(e, attr)
-                        if not callable(value):
-                            print(
-                                f"  - {attr}: {type(value).__name__} = {repr(value)[:100]}"
-                            )
-                    except:
-                        pass
-
-                print(f"\n{'='*60}")
-                print("Testing 4 methods to detect 429:")
-                print(f"{'='*60}")
-
-                # Method 1: String-based check
-                method1 = "429" in str(e) or "RESOURCE_EXHAUSTED" in str(e)
-                print(f"  Method 1 (string check): {method1}")
-                print(f"    - '429' in str(e): {'429' in str(e)}")
-                print(
-                    f"    - 'RESOURCE_EXHAUSTED' in str(e): {'RESOURCE_EXHAUSTED' in str(e)}"
-                )
-
-                # Method 2: hasattr status_code
-                method2_has = hasattr(e, "status_code")
-                method2 = method2_has and e.status_code == 429
-                print(f"  Method 2 (status_code attr): {method2}")
-                print(f"    - hasattr(e, 'status_code'): {method2_has}")
-                if method2_has:
-                    print(f"    - e.status_code: {e.status_code}")
-
-                # Method 3: hasattr code
-                method3_has = hasattr(e, "code")
-                method3 = method3_has and e.code == 429
-                print(f"  Method 3 (code attr): {method3}")
-                print(f"    - hasattr(e, 'code'): {method3_has}")
-                if method3_has:
-                    print(f"    - e.code: {e.code}")
-
-                # Method 4: Parse error dict
-                method4 = False
-                method4_has_error = hasattr(e, "error")
-                print(f"  Method 4 (error dict): {method4}")
-                print(f"    - hasattr(e, 'error'): {method4_has_error}")
-                if method4_has_error:
-                    try:
-                        error_dict = e.error
-                        print(f"    - e.error type: {type(error_dict)}")
-                        print(f"    - e.error: {error_dict}")
-                        if hasattr(error_dict, "get"):
-                            method4 = error_dict.get("code") == 429
-                            print(
-                                f"    - e.error.get('code'): {error_dict.get('code')}"
-                            )
-                    except Exception as parse_err:
-                        print(f"    - Error parsing: {parse_err}")
-
-                print(f"\n{'='*60}")
-                working_methods = [
-                    i
-                    for i, m in enumerate([method1, method2, method3, method4], 1)
-                    if m
-                ]
-                print(f"✅ Working methods: {working_methods}")
-                print(f"{'='*60}\n")
-
-                # Use Method 1 for now (safest fallback)
-                if method1:
-                    # Parse retry delay from error
-                    retry_delay = 30  # Defaults 30s
-                    if "retrydelay" in str(e):
-                        # Extract delay: "retry in 27.591s" -> 27
-
-                        match = re.search(r"(\d+)\.?\d*s", str(e))
-                        if match:
+            except Exception as e:
+                error_str = str(e)
+                # Retry logic for Rate Limit (429) and Server Errors (500, 502, 503, 504)
+                is_api_error = any(x in error_str for x in ["429", "500", "502", "503", "504", "RESOURCE_EXHAUSTED", "UNAVAILABLE", "Overloaded", "Internal", "Server Error"])
+                
+                if is_api_error:
+                     api_key_manager.log_request(current_key, success=False, error=error_str)
+                     retry_delay = 30
+                     if "retrydelay" in error_str:
+                         match = re.search(r"(\d+)\.?\d*s", error_str)
+                         if match:
                             retry_delay = int(float(match.group(1))) + 1
-
-                    # Log failed request
-                    api_key_manager.log_request(
-                        current_key, success=False, error=str(e)
-                    )
-
-                    if attempt < max_retries - 1:
-                        print(
-                            f"   ⏳ Rate limit hit, retry #{attempt + 1} sau {retry_delay}s..."
-                        )
+                            
+                     if attempt < max_retries - 1:
+                        reason = "Server/Network Issue"
+                        if "429" in error_str or "RESOURCE_EXHAUSTED" in error_str:
+                            reason = "Rate Limit"
+                        elif "503" in error_str or "Overloaded" in error_str:
+                            reason = "Model Overloaded"
+                            
+                        print(f"   ⏳ API issue ({reason}), retry #{attempt + 1} sau {retry_delay}s...")
                         time.sleep(retry_delay)
-                    else:
+                     else:
                         print(f"   ❌ Key exhausted after {max_retries} retries")
-                        break  # try next key
+                        break
                 else:
-                    # Other errors - don't retry
-                    raise
+                     # Re-raise unexpected errors (e.g. ValueError, TypeError)
+                     raise
 
-        # Current key failed all retries, try next key
         keys_tried += 1
         if keys_tried < max_keys:
             if not api_key_manager.rotate_key():
@@ -481,7 +314,6 @@ def generate_audio_data(client, text, voice="Kore", max_retries=3):
 
 def process_chapter(client, file_path, voice="Kore"):
     try:
-        # Step 1: Parse paths
         input_path = Path(file_path)
         parent_dir = input_path.parent
         output_dir = parent_dir / "TTS"
@@ -489,12 +321,9 @@ def process_chapter(client, file_path, voice="Kore"):
         output_path = output_dir / output_filename
 
         print(f"\n📖 Đang xử lý: {input_path.name}")
-
-        # Step 2: Create output directory
         output_dir.mkdir(exist_ok=True)
         print(f"📁 Output directory: {output_dir}")
 
-        # Step 3: Read file content
         print("📄 Đang đọc file...")
         with open(input_path, "r", encoding="utf-8") as f:
             markdown_text = f.read()
@@ -503,7 +332,6 @@ def process_chapter(client, file_path, voice="Kore"):
         clean_text = clean_markdown(markdown_text)
         print(f"✅ Đã làm sạch còn {len(clean_text):,} ký tự")
 
-        # Step 4: Count tokens and split into chunks
         total_tokens = count_tokens(clean_text)
         print(f"📊 Tổng số tokens: {total_tokens:,}")
 
@@ -515,7 +343,6 @@ def process_chapter(client, file_path, voice="Kore"):
             print("✅ File nhỏ hơn 2k tokens, xử lý một lần")
             text_chunks = [clean_text]
 
-        # Step 5: Generate audio for each chunk
         all_audio_parts = []
         total_bytes = 0
 
@@ -530,15 +357,11 @@ def process_chapter(client, file_path, voice="Kore"):
             print(f"   ✅ Chunk {i} hoàn thành: {len(audio_part):,} bytes")
 
         print(f"\n✅ Đã tạo xong {len(all_audio_parts)} phần audio")
-        print(
-            f"📊 Tổng dung lượng: {total_bytes:,} bytes ({total_bytes/1024/1024:.2f} MB)"
-        )
+        print(f"📊 Tổng dung lượng: {total_bytes:,} bytes ({total_bytes/1024/1024:.2f} MB)")
 
-        # Step 6: Concatenate all audio parts
         print("🔗 Đang nối các phần audio...")
         final_audio_data = b"".join(all_audio_parts)
 
-        # Step 7: Save WAV file
         print(f"💾 Đang lưu file...")
         save_wav_file(str(output_path), final_audio_data)
         print(f"✅ Đã lưu: {output_path}")
@@ -550,7 +373,6 @@ def process_chapter(client, file_path, voice="Kore"):
         return False
 
     except Exception as e:
-        # Partial Save: Preserve completed chunks before exiting
         try:
             if "all_audio_parts" in locals() and all_audio_parts:
                 partial_filename = output_filename.replace(".wav", "_PARTIAL.wav")
@@ -558,39 +380,22 @@ def process_chapter(client, file_path, voice="Kore"):
                 partial_audio = b"".join(all_audio_parts)
                 save_wav_file(str(partial_path), partial_audio)
 
-                print(
-                    f"\n💾 Saved partial progress ({len(all_audio_parts)}/{len(text_chunks)} chunks):"
-                )
+                print(f"\n💾 Saved partial progress ({len(all_audio_parts)}/{len(text_chunks)} chunks):")
                 print(f"   File: {partial_path}")
-                print(
-                    f"   Size: {len(partial_audio):,} bytes ({len(partial_audio)/1024/1024:.2f} MB)"
-                )
-                print(
-                    f"   ℹ️  You can listen to completed chunks while investigating the error."
-                )
+                print(f"   Size: {len(partial_audio):,} bytes ({len(partial_audio)/1024/1024:.2f} MB)")
+                print(f"   ℹ️  You can listen to completed chunks while investigating the error.")
         except Exception as save_error:
             print(f"⚠️  Warning: Failed to save partial progress: {save_error}")
 
         print(f"\n❌ Lỗi khi xử lý {file_path}: {e}")
         import traceback
-
         traceback.print_exc()
         return False
 
 
 def process_chapter_concurrent(client, file_path, voice="Kore", max_workers=3, resume=False):
     """
-    Process chapter with concurrent chunk processing.
-
-    Args:
-        client: Gemini client (not used, each thread creates own client)
-        file_path: Path to markdown file
-        voice: Voice name for TTS
-        max_workers: Number of concurrent workers (default: 3)
-        resume: Resume from checkpoint if available (default: False)
-
-    Returns:
-        bool: True if successful, False otherwise
+    Process chapter with concurrent chunk processing using individual chunk files.
     """
     global api_key_manager
 
@@ -606,38 +411,11 @@ def process_chapter_concurrent(client, file_path, voice="Kore", max_workers=3, r
         print(f"🎯 Processing Chapter: {input_path.name}")
         print(f"⚡ Concurrent Mode: {max_workers} workers")
         if resume:
-            print(f"🔄 Resume Mode: Will use checkpoint if available")
-        print(f"{'='*60}\n")
+            print(f"🔄 Resume Mode: Enabled")
+        print(f"{ '='*60}\n")
 
         # Step 2: Create output directory
         output_dir.mkdir(exist_ok=True)
-
-        # Step 2.5: Check for checkpoint (Phase 8: Resume Feature)
-        checkpoint = None
-        existing_audio = None
-        completed_chunks_list = []
-
-        if resume:
-            checkpoint = load_checkpoint(output_dir, input_path)
-            if checkpoint:
-                is_valid, message = verify_checkpoint(checkpoint, input_path, output_dir)
-                if is_valid:
-                    print(f"✅ Found valid checkpoint:")
-                    print(f"   Completed chunks: {len(checkpoint['completed_chunks'])}/{checkpoint['total_chunks']}")
-                    print(f"   Partial file: {checkpoint['partial_audio_file']}")
-                    print(f"   File size: {checkpoint['partial_audio_size']:,} bytes ({checkpoint['partial_audio_size']/1024/1024:.2f} MB)")
-                    print(f"   Timestamp: {checkpoint['timestamp']}")
-                    print()
-
-                    # Load existing partial audio
-                    partial_audio_path = output_dir / checkpoint['partial_audio_file']
-                    existing_audio = load_partial_audio(partial_audio_path)
-                    completed_chunks_list = checkpoint['completed_chunks']
-                    print(f"📦 Loaded {len(existing_audio):,} bytes from partial audio\n")
-                else:
-                    print(f"⚠️  Invalid checkpoint: {message}")
-                    print(f"   Starting fresh processing...\n")
-                    checkpoint = None
 
         # Step 3: Read and clean text
         with open(input_path, "r", encoding="utf-8") as f:
@@ -653,235 +431,158 @@ def process_chapter_concurrent(client, file_path, voice="Kore", max_workers=3, r
             text_chunks = [clean_text]
 
         total_chunks = len(text_chunks)
+        
+        # Step 5: Determine completed chunks (Resume logic)
+        completed_chunks_list = []
+        checkpoint = None
+        
+        if resume:
+            checkpoint = load_checkpoint(output_dir, input_path)
+            is_valid, valid_chunks, msg = verify_checkpoint(checkpoint, input_path, output_dir)
+            
+            if is_valid:
+                completed_chunks_list = valid_chunks
+                print(f"✅ Resuming from checkpoint: {len(completed_chunks_list)} chunks already done.")
+            else:
+                print(f"ℹ️  Resume info: {msg}. Starting fresh or reprocessing invalid chunks.")
 
-        # Step 4.5: Filter chunks to process (Phase 8: Resume Feature)
-        if checkpoint and completed_chunks_list:
-            # Only process chunks that are NOT in completed list
-            chunks_to_process = {
-                i: chunk for i, chunk in enumerate(text_chunks)
-                if i not in completed_chunks_list
-            }
-            print(f"📊 Chapter Info (Resume Mode):")
-            print(f"   Total chunks: {total_chunks}")
-            print(f"   Already completed: {len(completed_chunks_list)}")
-            print(f"   Remaining to process: {len(chunks_to_process)}")
-            print(f"   Total tokens: {total_tokens:,}")
-            print(f"   Expected API calls: {len(chunks_to_process)} (saved {len(completed_chunks_list)} calls!)")
-            print(
-                f"   Estimated time (concurrent): {(len(chunks_to_process) / max_workers) * 20:.0f}s ⚡"
-            )
-            print()
+        # Identify chunks to process
+        chunks_to_process = {}
+        for i, chunk in enumerate(text_chunks):
+            if i not in completed_chunks_list:
+                chunks_to_process[i] = chunk
+
+        # Info display
+        print(f"📊 Chapter Info:")
+        print(f"   Total chunks: {total_chunks}")
+        print(f"   Already completed: {len(completed_chunks_list)}")
+        print(f"   Remaining to process: {len(chunks_to_process)}")
+        
+        if not chunks_to_process and total_chunks > 0:
+            print("\n✨ All chunks already completed! Proceeding to assembly.")
         else:
-            # Process all chunks (normal mode)
-            chunks_to_process = {i: chunk for i, chunk in enumerate(text_chunks)}
-            print(f"📊 Chapter Info:")
-            print(f"   Total chunks: {total_chunks}")
-            print(f"   Total tokens: {total_tokens:,}")
-            print(f"   Expected API calls: {total_chunks}")
-            print(f"   Estimated time (sequential): {total_chunks * 20}s")
-            print(
-                f"   Estimated time (concurrent): {(total_chunks / max_workers) * 20:.0f}s ⚡"
-            )
+            print(f"   Expected API calls: {len(chunks_to_process)}")
+            print(f"   Estimated time: {(len(chunks_to_process) / max_workers) * 20:.0f}s ⚡")
             print()
 
-        # Thread-safe results storage
-        results = {}
-        results_lock = threading.Lock()
-
-        # Progress tracking
+        # Thread-safe locks
+        checkpoint_lock = threading.Lock()
         progress_lock = threading.Lock()
-        completed_count = [0]  # Use list for mutable counter
+        completed_count = [len(completed_chunks_list)] 
+        current_completed_set = set(completed_chunks_list)
 
         def process_single_chunk(chunk_id, chunk_text):
-            """Process a single chunk (runs in thread)"""
-            nonlocal results, results_lock, completed_count, progress_lock
-
+            """Process a single chunk and save to individual file"""
+            nonlocal current_completed_set
+            
             try:
-                # Get assigned API key for this chunk (round-robin)
+                # Get assigned API key
                 assigned_key = api_key_manager.get_key_for_chunk(chunk_id)
-
-                # Create client with assigned key
+                
+                # Create client
                 chunk_client = genai.Client(api_key=assigned_key)
-
-                # Generate audio (with retry logic)
-                audio_data = generate_audio_data(
-                    chunk_client, chunk_text, voice=voice
-                )
-
-                # Store result (thread-safe)
-                with results_lock:
-                    results[chunk_id] = audio_data
-
-                # Update progress (thread-safe)
+                
+                # Generate audio
+                audio_data = generate_audio_data(chunk_client, chunk_text, voice=voice, initial_key=assigned_key)
+                
+                # Save individual chunk file
+                chunk_path = get_chunk_path(output_dir, input_path.stem, chunk_id)
+                save_wav_file(chunk_path, audio_data)
+                
+                # Update progress and checkpoint
                 with progress_lock:
                     completed_count[0] += 1
-                    print(
-                        f"✅ Chunk {chunk_id + 1}/{total_chunks} completed ({completed_count[0]}/{total_chunks})"
+                    print(f"✅ Chunk {chunk_id + 1}/{total_chunks} saved to {chunk_path.name}")
+                    
+                with checkpoint_lock:
+                    current_completed_set.add(chunk_id)
+                    save_checkpoint(
+                        output_dir, input_path, total_chunks, list(current_completed_set), voice
                     )
-
-                return audio_data
-
+                
+                return True
+                
             except Exception as e:
                 print(f"❌ Error processing chunk {chunk_id + 1}: {e}")
-                with results_lock:
-                    results[chunk_id] = None  # Mark as failed
                 raise
 
-        # Step 5: Concurrent processing
-        if checkpoint and completed_chunks_list:
-            print(f"⏳ Starting concurrent processing with {max_workers} workers (Resume Mode)...")
-            print(f"   Processing {len(chunks_to_process)} remaining chunks...\n")
-        else:
-            print(f"⏳ Starting concurrent processing with {max_workers} workers...\n")
-
-        with ThreadPoolExecutor(max_workers=max_workers) as executor:
-            # Submit only chunks that need processing
-            future_to_chunk = {
-                executor.submit(process_single_chunk, chunk_id, chunk_text): chunk_id
-                for chunk_id, chunk_text in chunks_to_process.items()
-            }
-
-            # Wait for all to complete
-            for future in as_completed(future_to_chunk):
-                chunk_id = future_to_chunk[future]
-                try:
-                    future.result()  # Raises exception if chunk failed
-                except Exception as e:
-                    print(f"❌ Chunk {chunk_id + 1} failed: {e}")
-                    # Continue processing other chunks
-
-        # Step 6: Check for failed chunks
-        failed_chunks = [i for i, data in results.items() if data is None]
-        if failed_chunks:
-            print(
-                f"\n❌ {len(failed_chunks)} chunk(s) failed: {[i+1 for i in failed_chunks]}"
-            )
-
-            # Partial save of successful chunks (merge with existing if resume mode)
-            successful_chunks = {
-                i: data for i, data in results.items() if data is not None
-            }
-
-            if successful_chunks or existing_audio:
-                # Merge existing audio (from checkpoint) with newly processed chunks
-                all_completed_chunks = []
-                completed_indices = []
-
-                # Add existing audio if we're in resume mode
-                if existing_audio and completed_chunks_list:
-                    all_completed_chunks.append(existing_audio)
-                    completed_indices.extend(completed_chunks_list)
-
-                # Add newly successful chunks (in order)
-                if successful_chunks:
-                    new_chunk_indices = sorted(successful_chunks.keys())
-                    for i in new_chunk_indices:
-                        all_completed_chunks.append(successful_chunks[i])
-                        completed_indices.append(i)
-
-                # Combine all completed audio
-                partial_audio = b"".join(all_completed_chunks)
-                partial_filename = output_filename.replace(".wav", "_PARTIAL.wav")
-                partial_path = output_dir / partial_filename
-                save_wav_file(str(partial_path), partial_audio)
-
-                # Save checkpoint
-                checkpoint_path = save_checkpoint(
-                    output_dir, input_path, total_chunks, completed_indices, partial_filename, voice
-                )
-
-                print(
-                    f"\n💾 Saved partial progress ({len(completed_indices)}/{total_chunks} chunks):"
-                )
-                print(f"   File: {partial_path}")
-                print(
-                    f"   Size: {len(partial_audio):,} bytes ({len(partial_audio)/1024/1024:.2f} MB)"
-                )
-                print(f"   Checkpoint: {checkpoint_path}")
-                print(f"   ℹ️  You can resume with: --resume flag")
-
+        # Step 6: Execute Concurrent Processing
+        if chunks_to_process:
+            print(f"⏳ Starting processing with {max_workers} workers...\n")
+            
+            with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                future_to_chunk = {
+                    executor.submit(process_single_chunk, cid, text): cid
+                    for cid, text in chunks_to_process.items()
+                }
+                
+                for future in as_completed(future_to_chunk):
+                    chunk_id = future_to_chunk[future]
+                    try:
+                        future.result()
+                    except Exception:
+                        # Error already printed in thread
+                        pass
+        
+        # Step 7: Verify all chunks exist before assembly
+        print(f"\n🔍 Verifying chunks for assembly...")
+        missing_chunks = []
+        for i in range(total_chunks):
+            chunk_path = get_chunk_path(output_dir, input_path.stem, i)
+            if not chunk_path.exists():
+                missing_chunks.append(i)
+        
+        if missing_chunks:
+            print(f"❌ Missing chunks: {[i+1 for i in missing_chunks]}")
+            print(f"💾 Partial progress is saved in individual chunk files.")
+            print(f"ℹ️  Run again with --resume to finish.")
             return False
 
-        # Step 7: Assemble chunks in order (merge with existing if resume mode)
-        if existing_audio and completed_chunks_list:
-            print(f"\n🔧 Merging existing audio + {len(results)} new chunks...")
-
-            # Build complete audio: all chunks in order
-            all_audio_parts = []
+        # Step 8: Assemble Final Audio
+        print(f"🔗 Assembling {total_chunks} chunks in order...")
+        
+        # Create a new wave file for the final output
+        # We read parameters from the first chunk
+        first_chunk_path = get_chunk_path(output_dir, input_path.stem, 0)
+        if not first_chunk_path.exists():
+             print("❌ Critical error: First chunk missing, cannot determine WAV parameters.")
+             return False
+             
+        with wave.open(str(first_chunk_path), 'rb') as first_wav:
+            params = first_wav.getparams()
+            
+        with wave.open(str(output_path), 'wb') as final_wav:
+            final_wav.setparams(params)
+            
             for i in range(total_chunks):
-                if i in completed_chunks_list:
-                    # This chunk was already completed (from checkpoint)
-                    # Audio is already in existing_audio, but we need to extract it chunk by chunk
-                    # Actually, we can't extract individual chunks from existing_audio
-                    # So we need a different approach: store ALL audio parts in results dict
-                    pass
-                else:
-                    # This chunk was just processed
-                    all_audio_parts.append(results[i])
+                chunk_path = get_chunk_path(output_dir, input_path.stem, i)
+                with wave.open(str(chunk_path), 'rb') as chunk_wav:
+                    final_wav.writeframes(chunk_wav.readframes(chunk_wav.getnframes()))
 
-            # Since we can't extract individual chunks from existing_audio,
-            # we'll merge existing_audio (all completed chunks) + new chunks
-            # But this won't preserve order correctly...
-
-            # Better approach: just concatenate existing + new in order
-            # Create a complete list of all audio data in chunk order
-            complete_audio_parts = []
-
-            # We need to merge properly:
-            # - existing_audio contains chunks 0-9 (for B2-CH05 example)
-            # - results contains chunk 10
-            # Final should be: chunk 0, 1, 2, ..., 9, 10 in order
-
-            # Since existing_audio is already chunks 0-(n-1) concatenated,
-            # and results contains the remaining chunks,
-            # we can just append results to existing_audio
-
-            final_audio = existing_audio + b"".join([results[i] for i in sorted(results.keys())])
-
-            print(f"   Existing audio: {len(existing_audio):,} bytes")
-            print(f"   New chunks: {len(results)} chunks, {sum(len(results[i]) for i in results):,} bytes")
-        else:
-            print(f"\n🔧 Assembling {total_chunks} chunks in order...")
-            all_audio_parts = [results[i] for i in sorted(results.keys())]
-            final_audio = b"".join(all_audio_parts)
-
-        # Step 8: Save final audio
-        save_wav_file(str(output_path), final_audio)
-
-        # Step 9: Clean up checkpoint and partial files (Phase 8: Resume Feature)
-        if checkpoint:
-            checkpoint_file = output_dir / f".checkpoint_{input_path.stem}.json"
-            partial_file = output_dir / (output_filename.replace(".wav", "_PARTIAL.wav"))
-
-            if checkpoint_file.exists():
-                checkpoint_file.unlink()
-                print(f"\n🧹 Cleaned up checkpoint file")
-
-            if partial_file.exists():
-                partial_file.unlink()
-                print(f"🧹 Cleaned up partial audio file")
-
-        # Success message
+        print(f"✅ Audio assembled: {output_path}")
+        
+        # Step 9: Cleanup
+        print(f"🧹 Cleaning up chunk files...")
+        for i in range(total_chunks):
+            chunk_path = get_chunk_path(output_dir, input_path.stem, i)
+            try:
+                chunk_path.unlink()
+            except Exception as e:
+                print(f"⚠️  Failed to delete {chunk_path.name}: {e}")
+                
+        checkpoint_file = output_dir / f".checkpoint_{input_path.stem}.json"
+        if checkpoint_file.exists():
+            checkpoint_file.unlink()
+            
         print(f"\n{'='*60}")
         print(f"✅ Success! Audio saved to: {output_path}")
-        if existing_audio:
-            print(f"   Mode: Resume (merged existing + new chunks)")
-        print(f"   Total chunks: {total_chunks}")
-        print(
-            f"   Size: {len(final_audio):,} bytes ({len(final_audio)/1024/1024:.2f} MB)"
-        )
-        print(f"{'='*60}\n")
-
+        print(f"{ '='*60}\n")
+        
         return True
-
-    except FileNotFoundError:
-        print(f"❌ Error: File not found {file_path}")
-        return False
 
     except Exception as e:
         print(f"\n❌ Error in concurrent processing: {e}")
         import traceback
-
         traceback.print_exc()
         return False
 
