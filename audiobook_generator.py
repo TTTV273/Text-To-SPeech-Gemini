@@ -20,7 +20,7 @@ from text_chunker import count_tokens, split_into_chunks
 # Note: Token counting and chunking functions are now in text_chunker.py
 
 load_dotenv()
-api_key_manager = APIKeyManager(usage_file="api_usage.json", threshold=14)
+api_key_manager = APIKeyManager(usage_file="api_usage.json", threshold=9)
 
 
 def clean_markdown(text: str) -> str:
@@ -210,6 +210,7 @@ def generate_audio_data(client, text, voice="Kore", max_retries=3, initial_key=N
                 client = genai.Client(api_key=current_key)
                 response = client.models.generate_content(
                     model="gemini-2.5-flash-preview-tts",
+                    # model="gemini-2.5-pro-preview-tts",
                     contents=text,
                     config=types.GenerateContentConfig(
                         response_modalities=["AUDIO"],

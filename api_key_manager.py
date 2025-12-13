@@ -9,7 +9,7 @@ from pathlib import Path
 class APIKeyManager:
     """Manage multiple API keys with rotation and usage tracking"""
 
-    def __init__(self, usage_file="api_usage.json", threshold=14):
+    def __init__(self, usage_file="api_usage.json", threshold=9):
         self.usage_file = Path(usage_file)
         self.threshold = threshold  # Max requests before rotation
         self.keys = self.load_keys()
@@ -189,5 +189,5 @@ class APIKeyManager:
 
             status = "✅" if usage < self.threshold else "⚠️"
             print(
-                f"  {status} Key #{i + 1} ({key_hash}): {usage}/15 requests {active_marker}"
+                f"  {status} Key #{i + 1} ({key_hash}): {usage}/10 requests {active_marker}"
             )
