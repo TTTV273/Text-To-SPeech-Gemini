@@ -15,12 +15,41 @@ from google.genai import types
 from google.genai.errors import ClientError
 
 from api_key_manager import APIKeyManager
+from key_rotation_manager import KeyRotationManager
 from text_chunker import count_tokens, split_into_chunks
 
 # Note: Token counting and chunking functions are now in text_chunker.py
 
 load_dotenv()
 api_key_manager = APIKeyManager(usage_file="api_usage.json", threshold=9)
+
+
+def classify_error(error: Exception) -> str:
+    """
+    Phân loại error để quyết định retry strategy
+
+    Returns:
+        "QUOTA_EXHAUSTED": Key hết quota, remove hẳn
+        "RATE_LIMIT": Rate limit, cooldown 30s
+        "MODEL_OVERLOAD": Server busy, cooldown 30s
+        "UNKNOWN": Lỗi khác, không retry
+    """
+    error_str = str(error)
+
+    # Check 429 QUOTA_EXHAUSTED
+    if isinstance(error, ClientError):
+        if hasattr(error, 'code') and error.code == 429:
+            if 'quota' in error_str.lower() or 'RESOURCE_EXHAUSTED' in error_str:
+                return "QUOTA_EXHAUSTED"
+
+    # Check Model Overloaded
+    if 'Model Overloaded' in error_str or 'overloaded' in error_str.lower():
+        return "MODEL_OVERLOAD"
+
+    # Check soft-fail (finish_reason=OTHER with content=None)
+    # This is handled separately in generate_audio_data by checking response
+
+    return "UNKNOWN"
 
 
 def clean_markdown(text: str) -> str:
@@ -188,132 +217,126 @@ def save_wav_file(filename, pcm_data, channels=1, rate=24000, sample_width=2):
         wf.writeframes(pcm_data)  # Write PCM data
 
 
-def generate_audio_data(client, text, voice="Kore", max_retries=3, initial_key=None):
+def generate_audio_data(client, text, voice="Kore", rotation_manager=None):
     """
-    Generate audio with automatic retry and key rotation
+    Generate audio with automatic key rotation using KeyRotationManager
+
+    Args:
+        client: Gemini client (unused, kept for backwards compatibility)
+        text: Text to convert to speech
+        voice: Voice name (default: Kore)
+        rotation_manager: KeyRotationManager instance (required)
+
+    Returns:
+        bytes: Audio data
+
+    Raises:
+        Exception: If all keys fail or are exhausted
     """
-    global api_key_manager  # Access global manager
+    if rotation_manager is None:
+        raise ValueError("rotation_manager is required!")
 
-    attempt = 0
-    keys_tried = 0
-    max_keys = len(api_key_manager.keys)
+    global api_key_manager  # For logging only
 
-    while keys_tried < max_keys:
-        if keys_tried == 0 and initial_key:
-            current_key = initial_key
-        else:
-            current_key = api_key_manager.get_active_key()
+    max_attempts = 9  # Max attempts = number of keys
 
-        for attempt in range(max_retries):
-            try:
-                # Recreate client with current key
-                client = genai.Client(api_key=current_key)
-                response = client.models.generate_content(
-                    model="gemini-2.5-flash-preview-tts",
-                    # model="gemini-2.5-pro-preview-tts",
-                    contents=text,
-                    config=types.GenerateContentConfig(
-                        response_modalities=["AUDIO"],
-                        speech_config=types.SpeechConfig(
-                            voice_config=types.VoiceConfig(
-                                prebuilt_voice_config=types.PrebuiltVoiceConfig(
-                                    voice_name=voice,
-                                )
+    for attempt in range(max_attempts):
+        # Get next available key
+        current_key = rotation_manager.get_next_key()
+
+        if current_key is None:
+            raise Exception("❌ No available API keys! All exhausted.")
+
+        # Hash key for logging
+        key_hash = hashlib.md5(current_key.encode()).hexdigest()[:8]
+
+        try:
+            # Create client with current key
+            client = genai.Client(api_key=current_key)
+
+            # Call API
+            response = client.models.generate_content(
+                model="gemini-2.5-flash-preview-tts",
+                contents=text,
+                config=types.GenerateContentConfig(
+                    response_modalities=["AUDIO"],
+                    speech_config=types.SpeechConfig(
+                        voice_config=types.VoiceConfig(
+                            prebuilt_voice_config=types.PrebuiltVoiceConfig(
+                                voice_name=voice
                             )
-                        ),
+                        )
                     ),
-                )
-                
-                # Check candidates
-                if not hasattr(response, "candidates") or not response.candidates:
-                     raise ValueError(f"API returned no candidates! Full response: {response}")
+                ),
+            )
 
-                candidate = response.candidates[0]
-                if candidate.content is None:
-                    # Check finish_reason
-                    finish_reason = getattr(candidate, "finish_reason", "UNKNOWN")
-                    if "OTHER" in str(finish_reason):
-                         # Soft fail logic
-                         api_key_manager.log_request(current_key, success=False, error=f"Soft-fail: {finish_reason}")
-                         retry_delay = 30
-                         print(f"   ⏳ Rate limit soft-fail, retry #{attempt + 1} sau {retry_delay}s...")
-                         time.sleep(retry_delay)
-                         continue
-                    else:
-                         raise ValueError(f"API blocked content: {finish_reason}")
+            # Check candidates
+            if not hasattr(response, "candidates") or not response.candidates:
+                raise ValueError(f"API returned no candidates! Full response: {response}")
 
-                # Extract ALL audio parts
-                parts = candidate.content.parts
-                all_audio_parts = []
+            candidate = response.candidates[0]
 
-                # Get the index of the current key for logging
-                try:
-                    key_index = api_key_manager.keys.index(current_key) + 1
-                except ValueError:
-                    key_index = "?" # Fallback in case key is not found (shouldn't happen)
-
-                print(f"   📦 API#{key_index} trả về {len(parts)} parts")
-
-                for i, part in enumerate(parts, 1):
-                    if hasattr(part, "inline_data") and part.inline_data:
-                        audio_data = part.inline_data.data
-                        all_audio_parts.append(audio_data)
-                        print(f"      Part {i}: {len(audio_data):,} bytes")
-                    else:
-                        print(f"      Part {i}: No audio data (text part?)")
-
-                if not all_audio_parts:
-                    raise ValueError("No audio data found in API response!")
-
-                # Concatenate all parts
-                final_audio = b"".join(all_audio_parts)
-                print(f"   ✅ Tổng audio: {len(final_audio):,} bytes")
-
-                # Log successful request
-                api_key_manager.log_request(current_key, success=True)
-
-                return final_audio
-
-            except Exception as e:
-                error_str = str(e)
-                # Retry logic for Rate Limit (429) and Server Errors (500, 502, 503, 504)
-                is_api_error = any(x in error_str for x in ["429", "500", "502", "503", "504", "RESOURCE_EXHAUSTED", "UNAVAILABLE", "Overloaded", "Internal", "Server Error"])
-                
-                if is_api_error:
-                     api_key_manager.log_request(current_key, success=False, error=error_str)
-                     retry_delay = 30
-                     if "retrydelay" in error_str:
-                         match = re.search(r"(\d+)\.?\d*s", error_str)
-                         if match:
-                            retry_delay = int(float(match.group(1))) + 1
-                            
-                     if attempt < max_retries - 1:
-                        reason = "Server/Network Issue"
-                        if "429" in error_str or "RESOURCE_EXHAUSTED" in error_str:
-                            reason = "Rate Limit"
-                        elif "503" in error_str or "Overloaded" in error_str:
-                            reason = "Model Overloaded"
-                            
-                        print(f"   ⏳ API issue ({reason}), retry #{attempt + 1} sau {retry_delay}s...")
-                        time.sleep(retry_delay)
-                     else:
-                        print(f"   ❌ Key exhausted after {max_retries} retries")
-                        break
+            # Check for soft-fail (finish_reason=OTHER with content=None)
+            if candidate.content is None:
+                finish_reason = getattr(candidate, "finish_reason", "UNKNOWN")
+                if "OTHER" in str(finish_reason):
+                    # Rate limit soft-fail
+                    print(f"   ⚠️  Key ({key_hash}): Rate limit soft-fail, cooldown 30s")
+                    api_key_manager.log_request(current_key, success=False, error=f"Soft-fail: {finish_reason}")
+                    rotation_manager.mark_key_failed(current_key, cooldown_seconds=30)
+                    continue  # Retry with next key
                 else:
-                     # Re-raise unexpected errors (e.g. ValueError, TypeError)
-                     raise
+                    raise ValueError(f"API blocked content: {finish_reason}")
 
-        keys_tried += 1
-        if keys_tried < max_keys:
-            if not api_key_manager.rotate_key():
-                raise Exception("All API keys exhausted!")
-        else:
-            raise Exception("All API keys failed after retries!")
+            # Extract audio parts
+            parts = candidate.content.parts
+            all_audio_parts = []
 
-    raise Exception("Failed to generate audio after trying all keys!")
+            for i, part in enumerate(parts, 1):
+                if hasattr(part, "inline_data") and part.inline_data:
+                    audio_data = part.inline_data.data
+                    all_audio_parts.append(audio_data)
+                else:
+                    print(f"      Part {i}: No audio data (skipped)")
+
+            if not all_audio_parts:
+                raise ValueError("No audio data found in API response!")
+
+            # Concatenate all parts
+            final_audio = b"".join(all_audio_parts)
+
+            # Success → return key to queue
+            rotation_manager.return_key(current_key)
+            api_key_manager.log_request(current_key, success=True)
+
+            return final_audio
+
+        except Exception as e:
+            error_type = classify_error(e)
+
+            if error_type == "QUOTA_EXHAUSTED":
+                print(f"   ❌ Key ({key_hash}): Quota exhausted, removed permanently")
+                api_key_manager.log_request(current_key, success=False, error=str(e))
+                rotation_manager.remove_key(current_key)
+                # Retry với key khác
+
+            elif error_type == "RATE_LIMIT" or error_type == "MODEL_OVERLOAD":
+                print(f"   ⚠️  Key ({key_hash}): {error_type}, cooldown 30s")
+                api_key_manager.log_request(current_key, success=False, error=str(e))
+                rotation_manager.mark_key_failed(current_key, cooldown_seconds=30)
+                # Retry với key khác
+
+            else:
+                # Unknown error, return key và raise
+                rotation_manager.return_key(current_key)
+                print(f"   ❌ Unknown error: {e}")
+                raise
+
+    # Hết attempts
+    raise Exception(f"❌ Failed to generate audio after {max_attempts} attempts")
 
 
-def process_chapter(client, file_path, voice="Kore"):
+def process_chapter(client, file_path, voice="Kore", rotation_manager=None):
     try:
         input_path = Path(file_path)
         parent_dir = input_path.parent
@@ -351,7 +374,7 @@ def process_chapter(client, file_path, voice="Kore"):
             print(f"\n🎙️  Đang xử lý chunk {i}/{len(text_chunks)}...")
             print(f"   Chunk size: {count_tokens(chunk):,} tokens")
 
-            audio_part = generate_audio_data(client, chunk, voice=voice)
+            audio_part = generate_audio_data(client, chunk, voice=voice, rotation_manager=rotation_manager)
             all_audio_parts.append(audio_part)
             total_bytes += len(audio_part)
 
@@ -394,7 +417,7 @@ def process_chapter(client, file_path, voice="Kore"):
         return False
 
 
-def process_chapter_concurrent(client, file_path, voice="Kore", max_workers=3, resume=False):
+def process_chapter_concurrent(client, file_path, voice="Kore", max_workers=3, resume=False, rotation_manager=None):
     """
     Process chapter with concurrent chunk processing using individual chunk files.
     """
@@ -484,7 +507,7 @@ def process_chapter_concurrent(client, file_path, voice="Kore", max_workers=3, r
                 chunk_client = genai.Client(api_key=assigned_key)
                 
                 # Generate audio
-                audio_data = generate_audio_data(chunk_client, chunk_text, voice=voice, initial_key=assigned_key)
+                audio_data = generate_audio_data(chunk_client, chunk_text, voice=voice, rotation_manager=rotation_manager)
                 
                 # Save individual chunk file
                 chunk_path = get_chunk_path(output_dir, input_path.stem, chunk_id)
@@ -635,6 +658,10 @@ def main():
     global api_key_manager
     api_key_manager.print_usage_stats()
 
+    # Initialize KeyRotationManager
+    rotation_manager = KeyRotationManager(api_keys=api_key_manager.keys)
+    print(f"🔄 Key Rotation Manager initialized with {len(api_key_manager.keys)} keys\n")
+
     # Create client (for synchronous mode)
     client = genai.Client(api_key=api_key_manager.get_active_key())
 
@@ -654,13 +681,13 @@ def main():
         print(f"\n⚡ Using {mode_text} ({args.workers} workers)\n")
 
         success = process_chapter_concurrent(
-            client, file_path, voice=args.voice, max_workers=args.workers, resume=args.resume
+            client, file_path, voice=args.voice, max_workers=args.workers, resume=args.resume, rotation_manager=rotation_manager
         )
     else:
         print(
             f"\n📝 Using SYNCHRONOUS mode (use --concurrent for faster processing)\n"
         )
-        success = process_chapter(client, file_path, voice=args.voice)
+        success = process_chapter(client, file_path, voice=args.voice, rotation_manager=rotation_manager)
 
     # Final result
     if success:
