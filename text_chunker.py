@@ -17,8 +17,8 @@ Author: TTTV273
 Created: 2025-11-08 (Phase 9: Text Chunker Refactor)
 """
 
-import re
 import logging
+import re
 from typing import List
 
 # Import tiktoken for token counting
@@ -209,7 +209,7 @@ def split_large_paragraph(para: str, max_tokens: int) -> List[str]:
 # ============================================================
 
 
-def split_into_chunks(text: str, max_tokens: int = 2000) -> List[str]:
+def split_into_chunks(text: str, max_tokens: int = 1000) -> List[str]:
     """
     Split text into token-safe chunks with 3-level hierarchy.
 

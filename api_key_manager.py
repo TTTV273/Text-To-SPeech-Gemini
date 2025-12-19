@@ -97,7 +97,9 @@ class APIKeyManager:
             self.usage_data["keys"][key_hash]["last_used"] = datetime.now().isoformat()
 
             if error:
-                self.usage_data["keys"][key_hash]["last_error"] = datetime.now().isoformat()
+                self.usage_data["keys"][key_hash][
+                    "last_error"
+                ] = datetime.now().isoformat()
 
             self.save_usage()
 
@@ -156,22 +158,22 @@ class APIKeyManager:
             # This prevents the "bottleneck effect" where all chunks flock to the single next available key
             target_index = chunk_id % len(available_keys)
             key_index, assigned_key = available_keys[target_index]
-            
+
             key_hash = self.hash_key(assigned_key)
             usage = self.get_key_usage(assigned_key)
-            
+
             # Only log if we are doing a re-assignment (i.e., the "natural" key was exhausted)
             # Or just always log for clarity in debug mode? Let's keep it clean but informative.
             # The caller prints the chunk start, but we can print a subtle info if it's a "smart" assignment.
-            
+
             # Check if this was the "natural" assignment
             natural_index = chunk_id % len(self.keys)
             if key_index != natural_index:
-                 print(
-                    f"   twisted_rightwards_arrows Chunk {chunk_id + 1}: Re-routed to Key #{key_index + 1} ({key_hash}): {usage}/{self.threshold + 1} requests"
+                print(
+                    f"   🔄 Chunk {chunk_id + 1}: Re-routed to Key #{key_index + 1} ({key_hash}): {usage}/{self.threshold + 1} requests"
                 )
             else:
-                 print(
+                print(
                     f"   🔑 Chunk {chunk_id + 1}: Using Key #{key_index + 1} ({key_hash}): {usage}/{self.threshold + 1} requests"
                 )
 

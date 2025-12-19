@@ -23,6 +23,9 @@ from text_chunker import count_tokens, split_into_chunks
 load_dotenv()
 api_key_manager = APIKeyManager(usage_file="api_usage.json", threshold=9)
 
+# Configuration
+MAX_TOKENS_PER_CHUNK = 1000  # Chỉ cần sửa 1 chỗ này để thay đổi chunk size!
+
 
 def classify_error(error: Exception) -> str:
     """
@@ -248,7 +251,7 @@ def generate_audio_data(client, text, voice="Kore", rotation_manager=None):
             raise Exception("❌ No available API keys! All exhausted.")
 
         # Hash key for logging
-        key_hash = hashlib.md5(current_key.encode()).hexdigest()[:8]
+        key_hash = hashlib.sha256(current_key.encode()).hexdigest()[:8]
 
         try:
             # Create client with current key
@@ -359,12 +362,12 @@ def process_chapter(client, file_path, voice="Kore", rotation_manager=None):
         total_tokens = count_tokens(clean_text)
         print(f"📊 Tổng số tokens: {total_tokens:,}")
 
-        if total_tokens > 2000:
-            print("⚠️  File vượt 2k tokens, cần chia nhỏ...")
-            text_chunks = split_into_chunks(clean_text, max_tokens=2000)
+        if total_tokens > MAX_TOKENS_PER_CHUNK:
+            print(f"⚠️  File vượt {MAX_TOKENS_PER_CHUNK} tokens, cần chia nhỏ...")
+            text_chunks = split_into_chunks(clean_text, max_tokens=MAX_TOKENS_PER_CHUNK)
             print(f"📦 Đã chia thành {len(text_chunks)} chunks")
         else:
-            print("✅ File nhỏ hơn 2k tokens, xử lý một lần")
+            print(f"✅ File nhỏ hơn {MAX_TOKENS_PER_CHUNK} tokens, xử lý một lần")
             text_chunks = [clean_text]
 
         all_audio_parts = []
@@ -449,8 +452,8 @@ def process_chapter_concurrent(client, file_path, voice="Kore", max_workers=3, r
         total_tokens = count_tokens(clean_text)
 
         # Step 4: Split into chunks
-        if total_tokens > 2000:
-            text_chunks = split_into_chunks(clean_text, max_tokens=2000)
+        if total_tokens > MAX_TOKENS_PER_CHUNK:
+            text_chunks = split_into_chunks(clean_text, max_tokens=MAX_TOKENS_PER_CHUNK)
         else:
             text_chunks = [clean_text]
 

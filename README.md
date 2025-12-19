@@ -8,8 +8,8 @@ Convert Markdown chapters into high-quality audiobook files (`.wav`) using Googl
 
 **Key Highlights:**
 - ⚡ **Concurrent processing** with ThreadPoolExecutor for 2-3× speed improvement
-- 🔄 **Multi-API key rotation** supporting up to 7 keys with automatic quota management
-- 💾 **Resume feature** automatically resumes from checkpoint (91% quota savings!) ⭐ NEW!
+- 🔄 **Queue-based key rotation** with intelligent cooldown mechanism (0 wasted retries!) ⭐ NEW!
+- 💾 **Resume feature** automatically resumes from checkpoint (91% quota savings!)
 - 🎙️ **30 prebuilt voices** with natural language control
 - 🔒 **Thread-safe** quota tracking and key assignment
 - 📊 **Real-time progress tracking** with detailed metrics
@@ -148,7 +148,7 @@ Choose from 30 prebuilt voices:
 ### Phase 5: Multi-API Key Rotation ✅
 - Supports any number of API keys (GEMINI_API_KEY_1, GEMINI_API_KEY_2, ...) with automatic rotation
 - **Bug Fix:** Correctly assigns and utilizes individual keys for concurrent workers, significantly reducing `Rate Limit` and `Model Overloaded` errors.
-- Intelligent quota management (15 requests/day per key)
+- Intelligent quota management (10 requests/day per key)
 - Daily usage tracking in `api_usage.json`
 - Automatic fallback when keys are exhausted
 
@@ -175,7 +175,7 @@ Choose from 30 prebuilt voices:
 - **Auto-cleanup:** Removes checkpoint files on successful completion
 - **CLI flag:** Simple `--resume` flag to enable resume mode
 
-### Phase 9: Text Chunker Refactor ✅ NEW!
+### Phase 9: Text Chunker Refactor ✅
 - **3-level intelligent splitting:** Paragraph → Sentence → Word hierarchy
 - **Bug fix:** Fixed critical indentation bug causing 0 chunks for large files
 - **Modular design:** Separate `text_chunker.py` module for reusability
@@ -184,8 +184,18 @@ Choose from 30 prebuilt voices:
 - **Logging support:** DEBUG/INFO/WARNING levels for troubleshooting
 - **Handles edge cases:** Large paragraphs (>2000 tokens), no paragraph breaks, Vietnamese text
 
+### Phase 10: Queue-based Key Rotation ✅ NEW!
+- **Zero-waste retry strategy:** Immediately rotates to next key on failure (no retries with same key)
+- **Intelligent cooldown:** Failed keys enter 30s cooldown queue, auto-return when ready
+- **Error classification:** Distinguishes QUOTA_EXHAUSTED (remove) vs MODEL_OVERLOAD (cooldown)
+- **Thread-safe queue management:** Lock-based synchronization for concurrent access
+- **Auto-recovery:** Keys automatically return to available pool after cooldown
+- **Smart waiting:** When all keys cooldown, waits for shortest cooldown time
+- **Permanent removal:** Quota-exhausted keys removed from rotation permanently
+- **Performance boost:** ~9 minutes saved per error (0 wasted retry time vs 90s×6 keys)
+
 ### Core Features:
-- **Intelligent chunking:** 3-level splitting (paragraph/sentence/word) with edge case handling
+- **Intelligent chunking:** 3-level splitting (paragraph/sentence/word) with configurable chunk size (default: 1000 tokens)
 - **Markdown cleaning:** Removes headers, bold, italic, links, code blocks
 - **Token counting:** Uses tiktoken for accurate token estimation
 - **WAV output:** 16-bit PCM, 24kHz, mono format
@@ -219,6 +229,28 @@ your-book/
 
 ## 🔧 Configuration
 
+### Chunk Size Configuration
+
+**Location:** `audiobook_generator.py:27`
+
+```python
+MAX_TOKENS_PER_CHUNK = 1000  # Adjust this value to change chunk size
+```
+
+**Recommended values:**
+- **1000 tokens** (default) - Best audio quality, minimal distortion
+- **1500 tokens** - Balanced quality and speed
+- **2000 tokens** - Faster processing, may have slight distortion
+
+**When to adjust:**
+- Audio has distortion/noise → Decrease to 500-750 tokens
+- Need faster processing → Increase to 1500-2000 tokens
+- Testing audio quality → Try different values
+
+**Impact:**
+- Lower value = More chunks = Better quality + More API requests
+- Higher value = Fewer chunks = Faster processing + Potential distortion
+
 ### Worker Count Recommendations
 
 - **Small files (2-5 chunks):** `--workers 3` (default)
@@ -227,12 +259,12 @@ your-book/
 
 ### API Rate Limits
 
-**Free tier:** 15 requests per day per key
+**Free tier:** 10 requests per day per key (updated 2025-12-13)
 
-**With 7 keys:**
-- Total: 105 requests/day
-- ~105 chapters/day (1 chunk each)
-- ~11-12 large chapters/day (9 chunks each)
+**With 13 keys:**
+- Total: 130 requests/day
+- ~130 chapters/day (1 chunk each)
+- ~14-16 large chapters/day (8-9 chunks each)
 
 ---
 
@@ -315,21 +347,25 @@ If processing fails mid-chapter, completed chunks are automatically saved:
 
 ```
 Text-To-Speech-Gemini/
-├── audiobook_generator.py    # Main processing script
-├── api_key_manager.py         # Multi-key rotation + quota tracking
-├── api_usage.json             # Daily usage tracking (auto-generated)
-├── .env                       # API keys (not committed)
-├── requirements.txt           # Python dependencies
-├── PLAN.md                    # Detailed implementation plan (all phases)
-├── CLAUDE.md                  # AI collaboration guidelines
-└── README.md                  # This file
+├── audiobook_generator.py       # Main processing script
+├── api_key_manager.py           # Multi-key quota tracking & usage logging
+├── key_rotation_manager.py      # Queue-based key rotation with cooldown ⭐ NEW!
+├── text_chunker.py              # 3-level intelligent text chunking
+├── api_usage.json               # Daily usage tracking (auto-generated)
+├── .env                         # API keys (not committed)
+├── requirements.txt             # Python dependencies
+├── PLAN.md                      # Detailed implementation plan (all phases)
+├── CLAUDE.md                    # AI collaboration guidelines
+└── README.md                    # This file
 ```
 
 ### Key Files
 
 - **audiobook_generator.py:** Core TTS processing with sync + concurrent modes
-- **api_key_manager.py:** Thread-safe quota management and key rotation
-- **PLAN.md:** Complete project history with all 7 implementation phases
+- **api_key_manager.py:** Thread-safe quota tracking and daily usage logging
+- **key_rotation_manager.py:** Queue-based key rotation with intelligent cooldown mechanism ⭐ NEW!
+- **text_chunker.py:** 3-level intelligent text splitting (paragraph/sentence/word)
+- **PLAN.md:** Complete project history with all 10 implementation phases
 
 ### Testing
 
@@ -369,7 +405,8 @@ time uv run audiobook_generator.py chapter.md  # Compare with sync
 - Phase 6: Error recovery + partial save
 - Phase 7: Concurrent processing
 - Phase 8: Resume feature
-- Phase 9: Text chunker refactor (current) ⭐ NEW!
+- Phase 9: Text chunker refactor
+- Phase 10: Queue-based key rotation (current) ⭐ NEW!
 
 **API Documentation:** [Gemini TTS API](https://ai.google.dev/gemini-api/docs/models/gemini)
 
@@ -403,4 +440,4 @@ Created by [@TTTV273](https://github.com/TTTV273)
 
 ---
 
-**Last Updated:** 2025-12-02 (Improved Load Balancing & API Key Management)
+**Last Updated:** 2025-12-13 (Queue-based Key Rotation with Intelligent Cooldown - Phase 10)

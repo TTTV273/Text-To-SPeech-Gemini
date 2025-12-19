@@ -36,11 +36,18 @@ Vai trò của `gemini-tts` và `claude-tts` là **cố vấn (advisor)**, khôn
 
 ### Installation
 
-```bash
-pip install google-genai
-```
+1.  Install the dependencies using a package manager like `uv`:
+    ```bash
+    uv pip install -r requirements.txt
+    ```
 
 ### Running the Application
+
+To run scripts in this project, use the virtual environment with `uv`:
+
+```bash
+source .venv/bin/activate && uv run <script_name>.py
+```
 
 To generate speech, you would run a Python script. The following is an example of how to generate single-speaker audio:
 
