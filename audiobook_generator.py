@@ -250,8 +250,17 @@ def generate_audio_data(client, text, voice="Kore", rotation_manager=None):
         if current_key is None:
             raise Exception("❌ No available API keys! All exhausted.")
 
-        # Hash key for logging
+        # Hash key for logging và tìm Index
         key_hash = hashlib.sha256(current_key.encode()).hexdigest()[:8]
+        key_index = -1
+        try:
+            key_index = api_key_manager.keys.index(current_key) + 1
+        except ValueError:
+            pass
+        key_display = f"Key #{key_index} ({key_hash})" if key_index > 0 else f"Key ({key_hash})"
+        
+        # Log active key execution
+        print(f"      ▶️  Thực thi: {key_display}")
 
         try:
             # Create client with current key
@@ -284,7 +293,7 @@ def generate_audio_data(client, text, voice="Kore", rotation_manager=None):
                 finish_reason = getattr(candidate, "finish_reason", "UNKNOWN")
                 if "OTHER" in str(finish_reason):
                     # Rate limit soft-fail
-                    print(f"   ⚠️  Key ({key_hash}): Rate limit soft-fail, cooldown 30s")
+                    print(f"   ⚠️  {key_display}: Rate limit soft-fail, cooldown 30s")
                     api_key_manager.log_request(current_key, success=False, error=f"Soft-fail: {finish_reason}")
                     rotation_manager.mark_key_failed(current_key, cooldown_seconds=30)
                     continue  # Retry with next key
@@ -318,13 +327,13 @@ def generate_audio_data(client, text, voice="Kore", rotation_manager=None):
             error_type = classify_error(e)
 
             if error_type == "QUOTA_EXHAUSTED":
-                print(f"   ❌ Key ({key_hash}): Quota exhausted, removed permanently")
+                print(f"   ❌ {key_display}: Quota exhausted, removed permanently")
                 api_key_manager.log_request(current_key, success=False, error=str(e))
                 rotation_manager.remove_key(current_key)
                 # Retry với key khác
 
             elif error_type == "RATE_LIMIT" or error_type == "MODEL_OVERLOAD":
-                print(f"   ⚠️  Key ({key_hash}): {error_type}, cooldown 30s")
+                print(f"   ⚠️  {key_display}: {error_type}, cooldown 30s")
                 api_key_manager.log_request(current_key, success=False, error=str(e))
                 rotation_manager.mark_key_failed(current_key, cooldown_seconds=30)
                 # Retry với key khác
