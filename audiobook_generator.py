@@ -207,9 +207,9 @@ def verify_checkpoint(checkpoint, file_path, output_dir):
     return True, valid_chunks, f"Checkpoint valid ({len(valid_chunks)} chunks)"
 
 
-# ============================================================ 
-# WAV File Operations
-# ============================================================ 
+# ============================================================
+# Audio File Operations
+# ============================================================
 
 
 def save_wav_file(filename, pcm_data, channels=1, rate=24000, sample_width=2):
@@ -218,6 +218,75 @@ def save_wav_file(filename, pcm_data, channels=1, rate=24000, sample_width=2):
         wf.setsampwidth(sample_width)  # 16-bit
         wf.setframerate(rate)  # 24kHz
         wf.writeframes(pcm_data)  # Write PCM data
+
+
+def convert_wav_to_mp3(wav_path, mp3_path, bitrate="128k", delete_wav=True):
+    """
+    Convert WAV to MP3 using ffmpeg
+
+    Args:
+        wav_path: Path to source WAV file
+        mp3_path: Path to output MP3 file
+        bitrate: MP3 bitrate (default: 128k - good quality, small size)
+        delete_wav: Delete WAV file after successful conversion
+
+    Returns:
+        bool: True if successful
+    """
+    import subprocess
+
+    wav_path = Path(wav_path)
+    mp3_path = Path(mp3_path)
+
+    if not wav_path.exists():
+        print(f"❌ WAV file not found: {wav_path}")
+        return False
+
+    try:
+        # ffmpeg command: quiet mode, overwrite output
+        cmd = [
+            "ffmpeg", "-y",  # overwrite without asking
+            "-i", str(wav_path),  # input
+            "-codec:a", "libmp3lame",  # MP3 encoder
+            "-b:a", bitrate,  # bitrate
+            "-q:a", "2",  # quality (0-9, lower is better)
+            str(mp3_path)
+        ]
+
+        result = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=300  # 5 min timeout
+        )
+
+        if result.returncode != 0:
+            print(f"❌ ffmpeg error: {result.stderr}")
+            return False
+
+        # Verify output exists
+        if not mp3_path.exists():
+            print(f"❌ MP3 file was not created")
+            return False
+
+        # Show size comparison
+        wav_size = wav_path.stat().st_size
+        mp3_size = mp3_path.stat().st_size
+        reduction = (1 - mp3_size / wav_size) * 100
+        print(f"📦 Converted: {wav_size/1024/1024:.2f}MB → {mp3_size/1024/1024:.2f}MB ({reduction:.0f}% smaller)")
+
+        # Delete WAV if requested
+        if delete_wav:
+            wav_path.unlink()
+
+        return True
+
+    except subprocess.TimeoutExpired:
+        print(f"❌ ffmpeg timeout")
+        return False
+    except Exception as e:
+        print(f"❌ Conversion error: {e}")
+        return False
 
 
 def generate_audio_data(client, text, voice="Kore", rotation_manager=None):
@@ -353,8 +422,12 @@ def process_chapter(client, file_path, voice="Kore", rotation_manager=None):
         input_path = Path(file_path)
         parent_dir = input_path.parent
         output_dir = parent_dir / "TTS"
-        output_filename = input_path.stem + ".wav"
-        output_path = output_dir / output_filename
+        # Use .mp3 for final output
+        output_filename_mp3 = input_path.stem + ".mp3"
+        output_path_mp3 = output_dir / output_filename_mp3
+        # Temp WAV file
+        output_filename_wav = input_path.stem + ".wav"
+        output_path_wav = output_dir / output_filename_wav
 
         print(f"\n📖 Đang xử lý: {input_path.name}")
         output_dir.mkdir(exist_ok=True)
@@ -398,9 +471,14 @@ def process_chapter(client, file_path, voice="Kore", rotation_manager=None):
         print("🔗 Đang nối các phần audio...")
         final_audio_data = b"".join(all_audio_parts)
 
-        print(f"💾 Đang lưu file...")
-        save_wav_file(str(output_path), final_audio_data)
-        print(f"✅ Đã lưu: {output_path}")
+        print(f"💾 Đang lưu file WAV tạm...")
+        save_wav_file(str(output_path_wav), final_audio_data)
+
+        print(f"🔄 Đang convert sang MP3...")
+        if convert_wav_to_mp3(output_path_wav, output_path_mp3):
+            print(f"✅ Đã lưu: {output_path_mp3}")
+        else:
+            print(f"⚠️  Convert MP3 thất bại, giữ file WAV: {output_path_wav}")
 
         return True
 
@@ -411,7 +489,7 @@ def process_chapter(client, file_path, voice="Kore", rotation_manager=None):
     except Exception as e:
         try:
             if "all_audio_parts" in locals() and all_audio_parts:
-                partial_filename = output_filename.replace(".wav", "_PARTIAL.wav")
+                partial_filename = output_filename_wav.replace(".wav", "_PARTIAL.wav")
                 partial_path = output_dir / partial_filename
                 partial_audio = b"".join(all_audio_parts)
                 save_wav_file(str(partial_path), partial_audio)
@@ -440,8 +518,11 @@ def process_chapter_concurrent(client, file_path, voice="Kore", max_workers=3, r
         input_path = Path(file_path)
         parent_dir = input_path.parent
         output_dir = parent_dir / "TTS"
-        output_filename = input_path.stem + ".wav"
-        output_path = output_dir / output_filename
+        # Final output is MP3, temp WAV for assembly
+        output_filename_mp3 = input_path.stem + ".mp3"
+        output_path_mp3 = output_dir / output_filename_mp3
+        output_filename_wav = input_path.stem + ".wav"
+        output_path_wav = output_dir / output_filename_wav
 
         print(f"\n{'='*60}")
         print(f"🎯 Processing Chapter: {input_path.name}")
@@ -586,18 +667,26 @@ def process_chapter_concurrent(client, file_path, voice="Kore", max_workers=3, r
              
         with wave.open(str(first_chunk_path), 'rb') as first_wav:
             params = first_wav.getparams()
-            
-        with wave.open(str(output_path), 'wb') as final_wav:
+
+        with wave.open(str(output_path_wav), 'wb') as final_wav:
             final_wav.setparams(params)
-            
+
             for i in range(total_chunks):
                 chunk_path = get_chunk_path(output_dir, input_path.stem, i)
                 with wave.open(str(chunk_path), 'rb') as chunk_wav:
                     final_wav.writeframes(chunk_wav.readframes(chunk_wav.getnframes()))
 
-        print(f"✅ Audio assembled: {output_path}")
-        
-        # Step 9: Cleanup
+        print(f"✅ WAV assembled: {output_path_wav}")
+
+        # Step 9: Convert WAV to MP3
+        print(f"🔄 Converting to MP3...")
+        if convert_wav_to_mp3(output_path_wav, output_path_mp3):
+            final_output = output_path_mp3
+        else:
+            print(f"⚠️  MP3 conversion failed, keeping WAV file")
+            final_output = output_path_wav
+
+        # Step 10: Cleanup chunk files
         print(f"🧹 Cleaning up chunk files...")
         for i in range(total_chunks):
             chunk_path = get_chunk_path(output_dir, input_path.stem, i)
@@ -609,10 +698,10 @@ def process_chapter_concurrent(client, file_path, voice="Kore", max_workers=3, r
         checkpoint_file = output_dir / f".checkpoint_{input_path.stem}.json"
         if checkpoint_file.exists():
             checkpoint_file.unlink()
-            
+
         print(f"\n{'='*60}")
-        print(f"✅ Success! Audio saved to: {output_path}")
-        print(f"{ '='*60}\n")
+        print(f"✅ Success! Audio saved to: {final_output}")
+        print(f"{'='*60}\n")
         
         return True
 
