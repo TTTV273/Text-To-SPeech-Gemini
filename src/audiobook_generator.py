@@ -14,14 +14,14 @@ from google import genai
 from google.genai import types
 from google.genai.errors import ClientError
 
-from api_key_manager import APIKeyManager
-from key_rotation_manager import KeyRotationManager
-from text_chunker import count_tokens, split_into_chunks
+from .api_key_manager import APIKeyManager
+from .key_rotation_manager import KeyRotationManager
+from .text_chunker import count_tokens, split_into_chunks
 
 # Note: Token counting and chunking functions are now in text_chunker.py
 
 load_dotenv()
-api_key_manager = APIKeyManager(usage_file="api_usage.json", threshold=9)
+api_key_manager = APIKeyManager(usage_file="data/api_usage.json", threshold=9)
 
 # Configuration
 MAX_TOKENS_PER_CHUNK = 1000  # Chỉ cần sửa 1 chỗ này để thay đổi chunk size!

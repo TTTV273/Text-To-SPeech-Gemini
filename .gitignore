@@ -211,3 +211,9 @@ __marimo__/
 
 # API JSON
 api_usage.json
+
+# New structure
+output/
+data/
+scripts/__pycache__
+src/__pycache__

@@ -12,7 +12,7 @@ for i in {34..41}; do
     fi
 
     echo "📖 Đang xử lý: $file_name"
-    ./run_batch.sh "$file_name"
+    ./scripts/run_batch.sh "$file_name"
 done
 
 echo "Hoàn tất!"

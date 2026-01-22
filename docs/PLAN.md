@@ -4740,3 +4740,360 @@ def split_into_chunks(text: str, max_tokens: int = 2000) -> List[str]:
 
 ---
 
+## 🖥️ Phase 10: Text User Interface (TUI)
+
+**Date:** 2026-01-21
+**Status:** Planned ⏳
+**Goal:** Xây dựng giao diện Full TUI sử dụng framework **Textual** để thay thế CLI, giúp người dùng dễ sử dụng hơn.
+
+---
+
+### 🎯 Mục tiêu
+
+Tạo giao diện TUI hoàn chỉnh với các tính năng:
+- **Dashboard:** Hiển thị trạng thái chung, thống kê, job gần đây
+- **File Browser:** Duyệt và chọn file markdown trực tiếp trong TUI
+- **Voice Selection + Preview:** Chọn từ 30 giọng nói, nghe thử trước khi generate
+- **Real-time Progress:** Progress bar chi tiết cho từng chunk và tổng thể
+- **API Key Management:** Quản lý, thêm/xóa API keys qua TUI
+- **Settings Panel:** Cấu hình workers, token limit, output format...
+- **Job Queue:** Xếp hàng nhiều file để xử lý tuần tự
+
+---
+
+### 🏗️ Framework & Architecture
+
+**Framework:** [Textual](https://textual.textualize.io/) (Python TUI framework)
+
+**Lý do chọn Textual:**
+- ✅ Modern, async-based, phù hợp concurrent processing
+- ✅ CSS-like styling, dễ customize
+- ✅ Built-in widgets: Tree (file browser), DataTable, ProgressBar, Input
+- ✅ Cùng tác giả với Rich library
+- ✅ Hot-reload CSS khi dev
+
+**Dependencies mới:**
+```txt
+textual>=0.47.0
+textual-dev>=1.0.0  # For development (hot-reload CSS)
+```
+
+---
+
+### 📁 Cấu trúc thư mục
+
+```
+src/
+├── tui/
+│   ├── __init__.py
+│   ├── app.py              # Main TUI application
+│   ├── screens/
+│   │   ├── __init__.py
+│   │   ├── main_screen.py      # Dashboard chính
+│   │   ├── file_browser.py     # File/folder picker
+│   │   ├── voice_select.py     # Voice selection + preview
+│   │   ├── settings.py         # Settings panel
+│   │   ├── job_queue.py        # Queue management
+│   │   └── api_keys.py         # API key management
+│   ├── widgets/
+│   │   ├── __init__.py
+│   │   ├── progress_panel.py   # Real-time progress
+│   │   ├── voice_card.py       # Voice info + preview button
+│   │   └── job_card.py         # Job status card
+│   ├── styles/
+│   │   └── app.tcss            # Textual CSS
+│   └── utils.py                # TUI utilities
+├── audiobook_generator.py      # Existing (refactor for TUI)
+└── ...
+run_tui.py                      # Entry point script
+```
+
+---
+
+### 🚩 Implementation Phases
+
+#### **Phase 10.1: Khởi động & Khung sườn (Skeleton)**
+*Mục tiêu: Chạy được ứng dụng TUI đầu tiên, chưa cần logic phức tạp.*
+
+- [ ] Cài đặt thư viện `textual` vào requirements.txt
+- [ ] Tạo cấu trúc thư mục `src/tui/`
+- [ ] Viết file `app.py` cơ bản để hiển thị "Hello Gemini TTS"
+- [ ] Tạo script `run_tui.py` để chạy app dễ dàng
+- [ ] Test chạy thành công
+
+---
+
+#### **Phase 10.2: Bố cục & Điều hướng (Layout & Navigation)**
+*Mục tiêu: Chia màn hình thành Sidebar (bên trái) và Main Content (bên phải).*
+
+- [ ] Tạo layout chính dùng `Horizontal` container
+- [ ] Tạo Widget `Sidebar` với các nút menu (Dashboard, New Job, Settings...)
+- [ ] Sử dụng `ContentSwitcher` để thay đổi nội dung bên phải khi bấm menu
+- [ ] Thêm CSS cơ bản (`app.tcss`) để nhìn gọn gàng
+- [ ] Thêm keybindings (D=Dashboard, N=New Job, S=Settings, Q=Quit)
+
+---
+
+#### **Phase 10.3: Màn hình Dashboard (Static)**
+*Mục tiêu: Dựng giao diện Dashboard hiển thị thông tin tĩnh.*
+
+- [ ] Tạo widget `Dashboard`
+- [ ] Thêm các "stat box" hiển thị thông số (Số worker, API Key status...)
+- [ ] Thêm bảng `DataTable` để liệt kê các job gần đây (dữ liệu giả)
+- [ ] Style với CSS
+
+**Mockup:**
+```
+┌─────────────────────────────────────────────────────────────┐
+│  📚 Gemini TTS Audiobook Generator                [F1 Help] │
+├─────────────────┬───────────────────────────────────────────┤
+│ Quick Actions   │  Current Job                              │
+│ ────────────────│───────────────────────────────────────────│
+│ [N] New Job     │  📄 Chapter-01.md                         │
+│ [Q] Queue       │  🎙 Voice: Kore                           │
+│ [S] Settings    │  ⚡ Workers: 5                             │
+│ [K] API Keys    │                                           │
+│                 │  Progress: ████████░░░░░░░░ 45% (9/20)    │
+│                 │  Chunk 9: "Introduction to Python..."     │
+│                 │  ETA: 2m 30s                              │
+├─────────────────┴───────────────────────────────────────────┤
+│ Recent Jobs                                                 │
+│ ─────────────────────────────────────────────────────────── │
+│ ✅ Chapter-02.md  │ Kore  │ 15 chunks │ 3m 45s │ Completed  │
+│ ✅ Chapter-01.md  │ Puck  │ 12 chunks │ 2m 30s │ Completed  │
+└─────────────────────────────────────────────────────────────┘
+```
+
+---
+
+#### **Phase 10.4: Màn hình File Browser (Chức năng đầu tiên)**
+*Mục tiêu: Cho phép người dùng duyệt file để chọn markdown.*
+
+- [ ] Sử dụng widget `DirectoryTree` có sẵn của Textual
+- [ ] Xử lý sự kiện khi người dùng chọn file `.md`
+- [ ] Hiển thị đường dẫn file đã chọn lên màn hình
+- [ ] Hỗ trợ multi-select cho batch processing
+- [ ] Thêm filter để chỉ hiện file `.md`
+
+**Mockup:**
+```
+┌─────────────────────────────────────────────────────────────┐
+│  Select Files                                   [Esc] Back  │
+├─────────────────────────────────────────────────────────────┤
+│ 📁 /home/user/Documents/Books                               │
+│ ├── 📁 Python-Book/                                         │
+│ │   ├── 📄 Chapter-01.md                              [x]   │
+│ │   ├── 📄 Chapter-02.md                              [x]   │
+│ │   └── 📄 Chapter-03.md                              [ ]   │
+│ └── 📁 Other-Book/                                          │
+├─────────────────────────────────────────────────────────────┤
+│ Selected: 2 files                        [Enter] Confirm    │
+└─────────────────────────────────────────────────────────────┘
+```
+
+---
+
+#### **Phase 10.5: Voice Selection + Preview**
+*Mục tiêu: Cho phép chọn giọng nói và nghe thử trước khi generate.*
+
+- [ ] Hiển thị grid 30 giọng nói với style description
+- [ ] Tạo widget `VoiceCard` với tên, style, và nút Preview
+- [ ] Implement voice preview: Gọi API với text ngắn, play audio
+- [ ] Cho phép custom preview text
+- [ ] Highlight giọng đang được chọn
+
+**Mockup:**
+```
+┌─────────────────────────────────────────────────────────────┐
+│  Select Voice                                   [Esc] Back  │
+├─────────────────────────────────────────────────────────────┤
+│┌────────────────┐ ┌────────────────┐ ┌────────────────┐    │
+│ │ 🎙 Kore        │ │ 🎙 Puck        │ │ 🎙 Zephyr      │    │
+│ │ Style: Firm   │ │ Style: Upbeat  │ │ Style: Bright  │    │
+│ │ [▶ Preview]   │ │ [▶ Preview]    │ │ [▶ Preview]    │    │
+│ └────────────────┘ └────────────────┘ └────────────────┘    │
+│                                                             │
+│ Preview text: "Hello, this is a sample of my voice..."     │
+│ [Edit preview text]                                         │
+├─────────────────────────────────────────────────────────────┤
+│ Selected: Kore                           [Enter] Confirm    │
+└─────────────────────────────────────────────────────────────┘
+```
+
+---
+
+#### **Phase 10.6: Tích hợp Logic (Integration)**
+*Mục tiêu: Kết nối TUI với code logic cũ.*
+
+- [ ] Refactor `audiobook_generator.py` để dễ gọi từ bên ngoài (tách hàm main ra)
+- [ ] Viết logic cho nút "Start Job": Lấy file đã chọn → Gọi hàm generate
+- [ ] Chuyển hướng `print` output vào widget `Log` trên TUI
+- [ ] Implement real-time progress tracking
+- [ ] Handle errors và hiển thị trên TUI
+
+---
+
+#### **Phase 10.7: Settings Panel**
+*Mục tiêu: Cho phép cấu hình các tham số qua TUI.*
+
+- [ ] Concurrent mode toggle
+- [ ] Workers slider (1-7)
+- [ ] Auto-resume toggle
+- [ ] Max tokens per chunk input
+- [ ] Output directory picker
+- [ ] Auto convert MP3 toggle
+- [ ] MP3 bitrate selector
+- [ ] Save/Load settings to JSON
+
+**Mockup:**
+```
+┌─────────────────────────────────────────────────────────────┐
+│  Settings                                       [Esc] Back  │
+├─────────────────────────────────────────────────────────────┤
+│ Processing                                                  │
+│ ├── Concurrent mode:     [x] Enabled                        │
+│ ├── Workers:             [▼ 5 ▼] (1-7)                      │
+│ ├── Auto-resume:         [x] Enabled                        │
+│ └── Max tokens/chunk:    [1000]                             │
+│                                                             │
+│ Output                                                      │
+│ ├── Output directory:    [./TTS] [Browse]                   │
+│ ├── Auto convert MP3:    [x] Enabled                        │
+│ └── MP3 bitrate:         [▼ 128k ▼]                         │
+│                                                             │
+│ API                                                         │
+│ ├── Key rotation:        [x] Enabled                        │
+│ └── Cooldown (sec):      [30]                               │
+├─────────────────────────────────────────────────────────────┤
+│                              [Save] [Reset to Default]      │
+└─────────────────────────────────────────────────────────────┘
+```
+
+---
+
+#### **Phase 10.8: API Key Management**
+*Mục tiêu: Quản lý API keys qua TUI.*
+
+- [ ] Hiển thị danh sách keys với usage stats
+- [ ] Thêm key mới
+- [ ] Xóa key
+- [ ] Test key (verify valid)
+- [ ] Hiển thị quota remaining
+
+---
+
+#### **Phase 10.9: Job Queue**
+*Mục tiêu: Xếp hàng nhiều file để xử lý tuần tự.*
+
+- [ ] Hiển thị danh sách jobs trong queue
+- [ ] Thêm/xóa jobs từ queue
+- [ ] Reorder jobs (drag & drop hoặc up/down buttons)
+- [ ] Start/Pause/Stop queue processing
+- [ ] Show progress cho từng job
+
+---
+
+#### **Phase 10.10: Polish & UX**
+*Mục tiêu: Hoàn thiện UX và xử lý edge cases.*
+
+- [ ] Error handling với friendly messages
+- [ ] Keyboard shortcuts documentation (F1 Help)
+- [ ] Dark/Light theme toggle
+- [ ] Responsive layout cho terminal sizes khác nhau
+- [ ] Notifications cho completed jobs
+- [ ] Logging panel (collapsible)
+
+---
+
+### 📊 Ước tính thời gian
+
+| Phase | Tasks | Estimate |
+|-------|-------|----------|
+| 10.1: Skeleton | Setup, basic app shell | 1-2 giờ |
+| 10.2: Layout | Sidebar, navigation | 2-3 giờ |
+| 10.3: Dashboard | Stats, table, styling | 2-3 giờ |
+| 10.4: File Browser | DirectoryTree, selection | 2-3 giờ |
+| 10.5: Voice Select | Grid, preview, audio | 3-4 giờ |
+| 10.6: Integration | Connect to generator | 3-4 giờ |
+| 10.7: Settings | Form, save/load | 2-3 giờ |
+| 10.8: API Keys | Management UI | 2-3 giờ |
+| 10.9: Job Queue | Queue logic, UI | 3-4 giờ |
+| 10.10: Polish | UX, error handling | 2-3 giờ |
+
+**Tổng ước tính:** ~22-32 giờ làm việc
+
+---
+
+### 📋 Implementation Checklist
+
+**Phase 10.1: Skeleton**
+- [ ] Add `textual>=0.47.0` to requirements.txt
+- [ ] Run `pip install textual`
+- [ ] Create `src/tui/__init__.py`
+- [ ] Create `src/tui/app.py` with basic TTSApp class
+- [ ] Create `src/tui/styles/app.tcss` with basic styles
+- [ ] Create `run_tui.py` entry point
+- [ ] Test: `python run_tui.py` shows "Hello Gemini TTS"
+
+**Phase 10.2: Layout & Navigation**
+- [ ] Create Sidebar widget with menu buttons
+- [ ] Create MainContent container
+- [ ] Implement ContentSwitcher for view switching
+- [ ] Add keybindings (D, N, S, Q, K)
+- [ ] Style sidebar and main content area
+
+**Phase 10.3-10.10:** (To be updated as implementation progresses)
+
+---
+
+### 🎯 Success Criteria
+
+**Functionality:**
+- [ ] Can browse and select markdown files
+- [ ] Can select voice and preview
+- [ ] Can start TTS generation job
+- [ ] Shows real-time progress
+- [ ] Can manage API keys
+- [ ] Can configure settings
+- [ ] Can queue multiple jobs
+
+**Usability:**
+- [ ] Intuitive navigation
+- [ ] Keyboard shortcuts work
+- [ ] Clear error messages
+- [ ] Responsive to terminal size
+
+**Performance:**
+- [ ] Smooth UI (no blocking)
+- [ ] Progress updates in real-time
+- [ ] Fast startup time
+
+---
+
+### 🎓 Key Concepts to Learn
+
+**Textual Framework:**
+- App lifecycle (compose, mount, on_*)
+- Widgets (Static, Button, DataTable, DirectoryTree, Input)
+- CSS styling (TCSS syntax)
+- Message passing between widgets
+- Async operations in TUI
+- Screen management
+
+**Integration:**
+- Running long tasks without blocking UI
+- Progress reporting from worker to UI
+- Logging redirection
+- Error handling and display
+
+---
+
+### 📚 Resources
+
+- [Textual Documentation](https://textual.textualize.io/)
+- [Textual Tutorial](https://textual.textualize.io/tutorial/)
+- [Textual Widgets Reference](https://textual.textualize.io/widget_gallery/)
+- [Textual CSS Reference](https://textual.textualize.io/css_types/)
+
+---
+

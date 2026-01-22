@@ -22,7 +22,7 @@ process_file() {
     fi
 
     echo "📖 Đang xử lý: $file"
-    python audiobook_generator.py "$file" \
+    .venv/bin/python -m src.audiobook_generator "$file" \
         --voice "$VOICE" \
         --concurrent \
         --workers "$WORKERS" \
