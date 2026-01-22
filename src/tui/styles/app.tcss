@@ -1,0 +1,30 @@
+/* Sidebar bên trái, rộng 30 ký tự, cao 100%, có viền phải */
+#sidebar {
+  width: 30;
+  height: 400%;
+  dock: left;
+  border-right: vkey $panel;
+  background: $surface;
+}
+
+/* Nội dung bên phải chiếm hết chỗ còn lại */
+#main-content {
+  height: 100%;
+  padding: 2;
+}
+
+/* Label tiêu đề menu */
+#sidebar Label {
+  padding: 1;
+  text-align: center;
+  background: $primary;
+  color: $text;
+  width: 100%;
+}
+
+/* Nút bấm trong menu */
+#sidebar Button {
+  width: 100%;
+  border: none;
+  margin-top: 1;
+}

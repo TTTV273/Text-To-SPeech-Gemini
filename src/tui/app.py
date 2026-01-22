@@ -1,9 +1,11 @@
 from textual.app import App
-from textual.widgets import Label, Button
 from textual.containers import Container, Horizontal
+from textual.widgets import Button, Label
 
 
 class TTSApp(App):
+    CSS_PATH = "styles/app.tcss"
+
     def compose(self):
         with Horizontal():
             with Container(id="sidebar"):
