@@ -2,6 +2,8 @@ from textual.app import App
 from textual.containers import Container, Horizontal
 from textual.widgets import Button, Label
 
+from tui.screens.dashboard import Dashboard
+
 
 class TTSApp(App):
     CSS_PATH = "styles/app.tcss"
@@ -14,7 +16,7 @@ class TTSApp(App):
                 yield Button("New Job")
 
             with Container(id="main-content"):
-                yield Label("Welcome to Gemini TTS")
+                yield Dashboard()
 
 
 if __name__ == "__main__":
