@@ -1,6 +1,8 @@
 from textual.containers import Container
 from textual.widgets import DirectoryTree, Label
 
+from tui.messages import FileSelected
+
 
 class FileBrowser(Container):
     def compose(self):
@@ -10,6 +12,6 @@ class FileBrowser(Container):
 
     def on_directory_tree_file_selected(self, event: DirectoryTree.FileSelected):
         """Hàm này chạy khi user chọn một file"""
-        selected_file = event.path
-        # Tạm thời mình chỉ in ra console để test thôi
-        self.notify(f"Selected: {selected_file}")
+        selected_file = str(event.path)
+
+        self.post_message(FileSelected(selected_file))

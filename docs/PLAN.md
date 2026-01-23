@@ -5026,23 +5026,42 @@ run_tui.py                      # Entry point script
 
 ### 📋 Implementation Checklist
 
-**Phase 10.1: Skeleton**
-- [ ] Add `textual>=0.47.0` to requirements.txt
-- [ ] Run `pip install textual`
-- [ ] Create `src/tui/__init__.py`
-- [ ] Create `src/tui/app.py` with basic TTSApp class
-- [ ] Create `src/tui/styles/app.tcss` with basic styles
-- [ ] Create `run_tui.py` entry point
-- [ ] Test: `python run_tui.py` shows "Hello Gemini TTS"
+**Phase 10.1: Skeleton** ✅ COMPLETED (2025-11-08)
+- [x] Add `textual>=0.47.0` to requirements.txt
+- [x] Run `pip install textual`
+- [x] Create `src/tui/__init__.py`
+- [x] Create `src/tui/app.py` with basic TTSApp class
+- [x] Create `src/tui/styles/app.tcss` with basic styles
+- [x] Create `run_tui.py` entry point
+- [x] Test: `python run_tui.py` shows "Hello Gemini TTS"
 
-**Phase 10.2: Layout & Navigation**
-- [ ] Create Sidebar widget with menu buttons
-- [ ] Create MainContent container
-- [ ] Implement ContentSwitcher for view switching
-- [ ] Add keybindings (D, N, S, Q, K)
-- [ ] Style sidebar and main content area
+**Phase 10.2: Layout & Navigation** ✅ COMPLETED (2025-11-08)
+- [x] Create Sidebar widget with menu buttons
+- [x] Create MainContent container
+- [x] Implement ContentSwitcher for view switching
+- [x] Add keybindings (D, N, S, Q, K) - (Note: Implemented basic navigation, keybindings pending)
+- [x] Style sidebar and main content area
 
-**Phase 10.3-10.10:** (To be updated as implementation progresses)
+**Phase 10.3: Dashboard** ✅ COMPLETED (2025-11-08)
+- [x] Create `src/tui/screens/dashboard.py` with Dashboard widget
+- [x] Implement Stats layout with `Horizontal` and `Static` widgets
+- [x] Implement `DataTable` for recent jobs
+- [x] Style dashboard components in CSS
+
+**Phase 10.4: File Browser** ✅ COMPLETED (2025-11-08)
+- [x] Create `src/tui/screens/file_browser.py`
+- [x] Implement `DirectoryTree` widget
+- [x] Handle file selection events
+- [x] Integrate with main app navigation (New Job button)
+
+**Phase 10.5: Voice Selection** 🚧 IN PROGRESS
+- [ ] Create `src/tui/screens/voice_select.py`
+- [ ] Design `VoiceCard` widget
+- [ ] Implement `VoiceSelect` container with Grid layout
+- [ ] Add dummy voice data for display
+- [ ] Integrate into navigation flow
+
+**Phase 10.6-10.10:** (Pending)
 
 ---
 
