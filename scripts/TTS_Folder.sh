@@ -2,7 +2,7 @@
 
 echo "Đang xử lý các file TTS..."
 
-for i in {34..41}; do
+for i in {39..50}; do
     file_name="/mnt/hdd1tb/Book/Wheel_Of_Time/B5/Translated/B5-CH$i/B5-CH$i.md"
 
     # Kiểm tra file tồn tại trước khi chạy
@@ -13,6 +13,10 @@ for i in {34..41}; do
 
     echo "📖 Đang xử lý: $file_name"
     ./scripts/run_batch.sh "$file_name"
+
+    mp3_file="/mnt/hdd1tb/Book/Wheel_Of_Time/B5/Translated/B5-CH$i/TTS/B5-CH$i.mp3"
+    mv "$mp3_file" "$destination"
+    echo "✅ Đã copy: B5-CH$i.mp3"
 done
 
 echo "Hoàn tất!"
