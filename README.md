@@ -116,6 +116,7 @@ voices/
 ./ov chapter.md --speed 1.0           # Speech speed (default: 1.0)
 ./ov chapter.md --language vi         # Language (default: vi)
 ./ov chapter.md --max-tokens 500      # Max tokens per chunk
+./ov chapter.md --no-normalize        # Disable Vietnamese text normalization
 ./ov chapter.md --overwrite           # Overwrite existing output
 ./ov chapter.md --keep-wav            # Keep intermediate WAV
 ./ov chapter.md --resume             # Resume from checkpoint after error

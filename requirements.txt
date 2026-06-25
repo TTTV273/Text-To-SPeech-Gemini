@@ -12,3 +12,6 @@ tiktoken>=0.5.0
 
 # Textual
 textual >=0.47.0
+
+# Vietnamese text normalization for local OmniVoice TTS
+vietnormalizer==0.2.3

@@ -33,6 +33,23 @@ def clean_markdown(text: str) -> str:
     return text.strip()
 
 
+def normalize_vietnamese_text(text: str) -> str:
+    try:
+        from vietnormalizer import VietnameseNormalizer
+    except ImportError as exc:
+        raise ImportError(
+            "vietnormalizer is required for OmniVoice Vietnamese normalization. "
+            "Install dependencies with: uv pip install -r requirements.txt, "
+            "or run with --no-normalize."
+        ) from exc
+
+    normalizer = VietnameseNormalizer(enable_transliteration=False)
+    normalized = normalizer.normalize(text)
+    if not normalized:
+        raise ValueError("Input text is empty after Vietnamese normalization")
+    return normalized
+
+
 # ============================================================
 # Fallback Chunker (when tiktoken unavailable)
 # ============================================================
@@ -236,6 +253,7 @@ def save_checkpoint(
     ref_audio: Path,
     ref_audio_hash: str,
     max_tokens: int,
+    normalize_text: bool,
     num_step: int,
     total_chunks: int,
     completed_chunks: list[int],
@@ -247,6 +265,7 @@ def save_checkpoint(
         "ref_audio": str(ref_audio),
         "ref_audio_hash": ref_audio_hash,
         "max_tokens": max_tokens,
+        "normalize_text": normalize_text,
         "num_step": num_step,
         "total_chunks": total_chunks,
         "completed_chunks": sorted(completed_chunks),
@@ -274,6 +293,7 @@ def verify_checkpoint(
     ref_audio: Path,
     ref_audio_hash: str,
     max_tokens: int,
+    normalize_text: bool,
     num_step: int,
     total_chunks: int,
     output_path: Path,
@@ -292,6 +312,9 @@ def verify_checkpoint(
 
     if checkpoint.get("max_tokens") != max_tokens:
         return False, [], "Max tokens changed since checkpoint"
+
+    if checkpoint.get("normalize_text", False) != normalize_text:
+        return False, [], "Text normalization setting changed since checkpoint"
 
     if checkpoint.get("num_step") != num_step:
         return False, [], "Diffusion steps changed since checkpoint"
@@ -431,7 +454,7 @@ def generate_audio(model, text: str, ref_audio, ref_text, args) -> object:
 # ============================================================
 
 
-def read_input_text(file_path: str, clean_md: bool) -> str:
+def read_input_text(file_path: str, clean_md: bool, normalize_text: bool) -> str:
     input_path = Path(file_path)
     if not input_path.exists():
         raise FileNotFoundError(f"Input file not found: {file_path}")
@@ -440,6 +463,10 @@ def read_input_text(file_path: str, clean_md: bool) -> str:
     text = clean_markdown(raw_text) if clean_md else raw_text.strip()
     if not text:
         raise ValueError("Input text is empty after cleaning")
+    if normalize_text:
+        before_len = len(text)
+        text = normalize_vietnamese_text(text)
+        print(f"🧼 Vietnamese normalization: {before_len:,} → {len(text):,} chars")
     return text
 
 
@@ -456,7 +483,7 @@ def process(voice_name: str, file_path: str, args) -> Path:
     ref_audio, ref_text = resolve_voice(voice_name, voice_dir)
 
     # Read input
-    clean_text = read_input_text(file_path, args.markdown)
+    clean_text = read_input_text(file_path, args.markdown, args.normalize)
 
     # Output path
     output_path = Path(args.output) if args.output else get_default_output_path(file_path, voice_name)
@@ -483,7 +510,7 @@ def process(voice_name: str, file_path: str, args) -> Path:
         is_valid, valid_chunks, msg = verify_checkpoint(
             checkpoint, file_path, input_hash, voice_name,
             ref_audio, ref_audio_hash,
-            args.max_tokens, args.num_step, total_chunks, output_path,
+            args.max_tokens, args.normalize, args.num_step, total_chunks, output_path,
         )
         if is_valid:
             completed_set = set(valid_chunks)
@@ -533,7 +560,7 @@ def process(voice_name: str, file_path: str, args) -> Path:
             save_checkpoint(
                 checkpoint_path, file_path, input_hash,
                 voice_name, ref_audio, ref_audio_hash,
-                args.max_tokens, args.num_step,
+                args.max_tokens, args.normalize, args.num_step,
                 total_chunks, list(completed_set),
             )
 
@@ -616,6 +643,12 @@ def build_parser() -> argparse.ArgumentParser:
         default=MAX_TOKENS_PER_CHUNK,
         help=f"Maximum tokens per chunk (default: {MAX_TOKENS_PER_CHUNK})",
     )
+    parser.add_argument(
+        "--no-normalize",
+        dest="normalize",
+        action="store_false",
+        help="Disable Vietnamese text normalization before OmniVoice generation",
+    )
 
     # Voice / model config
     parser.add_argument("--voice-dir", help=f"Voice samples directory (default: {DEFAULT_VOICE_DIR})")
@@ -631,7 +664,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--speed", type=float, default=1.0, help="Speech speed factor (default: 1.0)")
     parser.add_argument("--duration", type=float, help="Fixed output duration in seconds")
 
-    parser.set_defaults(markdown=True)
+    parser.set_defaults(markdown=True, normalize=True)
     return parser
 
 
