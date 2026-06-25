@@ -195,6 +195,15 @@ This distributes files evenly: even-indexed files run on node 0, odd-indexed on 
 
 The NUMA launcher defaults to 8 threads per process and pins CPU execution plus memory allocation to one socket. For batch audiobook work, run one process on node 0 and another on node 1 for different files/chunks.
 
+**Parallel chunks within a single file:**
+
+```bash
+# Split chunks across 2 NUMA nodes, 2 workers run in parallel
+ov-linux chapter.md --parallel-chunks 2 --resume
+```
+
+Each worker loads the model once, generates its assigned chunks (interleaved: node 0 gets chunks 1,3,5..., node 1 gets 2,4,6...), and writes WAV files. The parent process merges all chunks in order and converts to MP3. Falls back to sequential if fewer than 2 chunks.
+
 ### OpenVINO Phase (experimental)
 
 `ov-openvino` uses an OpenVINO IR model instead of native PyTorch for the LLM forward pass. Convert the model first, then run:

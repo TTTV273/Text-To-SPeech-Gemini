@@ -153,6 +153,7 @@ models/openvino/
 
 # OmniVoice test outputs
 TTS/test_short.*
+TTS/test_multi.*
 
 # Spyder project settings
 .spyderproject
