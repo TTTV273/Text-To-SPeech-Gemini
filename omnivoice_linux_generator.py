@@ -119,7 +119,7 @@ def build_parser() -> argparse.ArgumentParser:
         default="float32",
         help="Model dtype (default: float32)",
     )
-    parser.add_argument("--num-step", type=int, default=50, help="Diffusion steps (default: 50)")
+    parser.add_argument("--num-step", type=int, default=16, help="Diffusion steps (default: 16)")
     parser.add_argument("--speed", type=float, default=1.0, help="Speech speed factor (default: 1.0)")
     parser.add_argument("--duration", type=float, help="Fixed output duration in seconds")
     parser.add_argument(

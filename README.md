@@ -159,7 +159,9 @@ Linux defaults are CPU-safe:
 ```text
 device: cpu
 dtype: float32
-num-step: 50
+num-step: 16
+torch threads: 16
+torch inter-op threads: 1
 ```
 
 **Benchmark thread counts:**
@@ -172,7 +174,19 @@ num-step: 50
 
 For Xeon E5-2670 dual-socket systems, `16` is the single-process baseline. `32` is only a benchmark check because SMT can slow down matrix-heavy inference.
 
-**NUMA-pinned run:**
+**Batch parallel across 2 NUMA nodes:**
+
+```bash
+# All .md files in a directory, split across both sockets
+scripts/batch_numa.sh 2.DATA/BOOK-2_Learn-Python
+
+# With resume + OpenVINO backend
+scripts/batch_numa.sh --resume --openvino 2.DATA/BOOK-2_Learn-Python
+```
+
+This distributes files evenly: even-indexed files run on node 0, odd-indexed on node 1, each pinned with `numactl --cpunodebind --membind`. 8 threads per process = 16 physical cores total.
+
+**NUMA-pinned single file:**
 
 ```bash
 ./scripts/ov_linux_numa.sh 0 chapter.md
