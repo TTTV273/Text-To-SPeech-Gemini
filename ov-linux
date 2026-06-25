@@ -1,0 +1,35 @@
+#!/bin/bash
+# ov-linux - OmniVoice Linux CPU wrapper
+# Usage: ov-linux [voice] <file> [options]
+
+set -euo pipefail
+
+SCRIPT_SOURCE="$0"
+while [ -L "$SCRIPT_SOURCE" ]; do
+    SCRIPT_DIR="$(cd "$(dirname "$SCRIPT_SOURCE")" && pwd)"
+    SCRIPT_SOURCE="$(readlink "$SCRIPT_SOURCE")"
+    [[ "$SCRIPT_SOURCE" != /* ]] && SCRIPT_SOURCE="$SCRIPT_DIR/$SCRIPT_SOURCE"
+done
+SCRIPT_DIR="$(cd "$(dirname "$SCRIPT_SOURCE")" && pwd)"
+
+if [ -x "$SCRIPT_DIR/.venv-omnivoice/bin/python" ]; then
+    PYTHON="$SCRIPT_DIR/.venv-omnivoice/bin/python"
+elif [ -x "$SCRIPT_DIR/.venv/bin/python" ]; then
+    PYTHON="$SCRIPT_DIR/.venv/bin/python"
+elif command -v python3.12 >/dev/null 2>&1; then
+    PYTHON="python3.12"
+elif command -v python3.11 >/dev/null 2>&1; then
+    PYTHON="python3.11"
+else
+    echo "Error: Python 3.12 or 3.11 not found. Do not use system Python 3.14 for OmniVoice." >&2
+    exit 1
+fi
+
+export OMP_NUM_THREADS="${OMP_NUM_THREADS:-16}"
+export MKL_NUM_THREADS="${MKL_NUM_THREADS:-16}"
+export OMP_PROC_BIND="${OMP_PROC_BIND:-close}"
+export OMP_PLACES="${OMP_PLACES:-cores}"
+
+export PYTHONPATH="$SCRIPT_DIR/src${PYTHONPATH:+:$PYTHONPATH}"
+
+exec "$PYTHON" "$SCRIPT_DIR/omnivoice_linux_generator.py" "$@"

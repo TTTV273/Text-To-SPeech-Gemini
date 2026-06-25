@@ -141,11 +141,18 @@ celerybeat.pid
 .env
 .envrc
 .venv
+.venv-omnivoice
 env/
 venv/
 ENV/
 env.bak/
 venv.bak/
+
+# OpenVINO converted models
+models/openvino/
+
+# OmniVoice test outputs
+TTS/test_short.*
 
 # Spyder project settings
 .spyderproject

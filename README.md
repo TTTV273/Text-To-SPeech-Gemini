@@ -78,6 +78,8 @@ uv run audiobook_generator.py chapter.md --concurrent --workers 7
 
 Use this when you want local TTS with OmniVoice (600+ languages, voice cloning, voice design) instead of the Gemini API. No API key required.
 
+`./ov` is the Mac/MPS-oriented launcher. For Linux CPU machines, use `./ov-linux` instead.
+
 **Quick start:**
 
 ```bash
@@ -122,6 +124,62 @@ voices/
 ./ov chapter.md --resume             # Resume from checkpoint after error
 ./ov chapter.md --output custom.mp3   # Custom output path
 ```
+
+### Local OmniVoice on Linux CPU
+
+Use this path for Linux machines where CUDA is not viable, especially old dual-socket Xeon systems. Keep `omnivoice_generator.py` and `./ov` for Mac; Linux uses `omnivoice_linux_generator.py` and `./ov-linux`.
+
+**Recommended environment:**
+
+```bash
+# Use Python 3.12 or 3.11. Avoid system Python 3.14 for OmniVoice/PyTorch.
+python3.12 -m venv .venv-omnivoice
+source .venv-omnivoice/bin/activate
+
+# Install CPU-only PyTorch first. Do not install CUDA wheels for old Kepler GPUs.
+pip install torch torchaudio --index-url https://download.pytorch.org/whl/cpu
+pip install -r requirements-omnivoice-linux.txt
+```
+
+Arch Linux system packages:
+
+```bash
+sudo pacman -S ffmpeg numactl
+```
+
+**Baseline run:**
+
+```bash
+./ov-linux chapter.md
+./ov-linux Kore chapter.md --resume
+```
+
+Linux defaults are CPU-safe:
+
+```text
+device: cpu
+dtype: float32
+num-step: 50
+```
+
+**Benchmark thread counts:**
+
+```bash
+./ov-linux chapter.md --torch-threads 8 --overwrite
+./ov-linux chapter.md --torch-threads 16 --overwrite
+./ov-linux chapter.md --torch-threads 32 --overwrite
+```
+
+For Xeon E5-2670 dual-socket systems, `16` is the single-process baseline. `32` is only a benchmark check because SMT can slow down matrix-heavy inference.
+
+**NUMA-pinned run:**
+
+```bash
+./scripts/ov_linux_numa.sh 0 chapter.md
+./scripts/ov_linux_numa.sh 1 Kore chapter.md --resume
+```
+
+The NUMA launcher defaults to 8 threads per process and pins CPU execution plus memory allocation to one socket. For batch audiobook work, run one process on node 0 and another on node 1 for different files/chunks.
 
 ### Performance Comparison
 
