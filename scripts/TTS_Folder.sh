@@ -2,13 +2,13 @@
 
 echo "Đang xử lý các file TTS..."
 
-destination="/mnt/hdd1tb/Book/Wheel_Of_Time/B5/TTS/"
+destination="/mnt/hdd1tb/Book/Wheel_Of_Time/B6/TTS/"
 
 # Tạo thư mục đích nếu chưa có
 mkdir -p "$destination"
 
-for i in {39..50}; do
-    file_name="/mnt/hdd1tb/Book/Wheel_Of_Time/B5/Translated/B5-CH$i/B5-CH$i.md"
+for i in {11..15}; do
+    file_name="/mnt/hdd1tb/Book/Wheel_Of_Time/B6/Translated/B6-CH$i/B6-CH$i.md"
 
     # Kiểm tra file tồn tại trước khi chạy
     if [ ! -f "$file_name" ]; then
@@ -23,15 +23,14 @@ for i in {39..50}; do
         continue
     fi
 
-    mp3_file="/mnt/hdd1tb/Book/Wheel_Of_Time/B5/Translated/B5-CH$i/TTS/B5-CH$i.mp3"
+    mp3_file="/mnt/hdd1tb/Book/Wheel_Of_Time/B6/Translated/B6-CH$i/TTS/B6-CH$i.mp3"
 
     if [ -f "$mp3_file" ]; then
         mv "$mp3_file" "$destination"
-        echo "✅ Đã di chuyển: B5-CH$i.mp3"
+        echo "✅ Đã di chuyển: B6-CH$i.mp3"
     else
         echo "❌ Không tìm thấy: $mp3_file"
     fi
 done
 
 echo "Hoàn tất!"
-
