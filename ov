@@ -1,0 +1,29 @@
+#!/bin/bash
+# ov — OmniVoice TTS wrapper
+# Usage: ov [voice] <file> [options]
+#
+# Examples:
+#   ov chapter.md                    # Default voice (Kore)
+#   ov Kore chapter.md               # Named voice
+#   ov chapter.md --num-step 50      # Custom steps
+
+# Resolve symlink to find actual script location
+SCRIPT_SOURCE="$0"
+while [ -L "$SCRIPT_SOURCE" ]; do
+    SCRIPT_DIR="$(cd "$(dirname "$SCRIPT_SOURCE")" && pwd)"
+    SCRIPT_SOURCE="$(readlink "$SCRIPT_SOURCE")"
+    [[ "$SCRIPT_SOURCE" != /* ]] && SCRIPT_SOURCE="$SCRIPT_DIR/$SCRIPT_SOURCE"
+done
+SCRIPT_DIR="$(cd "$(dirname "$SCRIPT_SOURCE")" && pwd)"
+
+# Find python3.11 with omnivoice installed
+if [ -x "/opt/homebrew/opt/python@3.11/bin/python3.11" ]; then
+    PYTHON="/opt/homebrew/opt/python@3.11/bin/python3.11"
+elif command -v python3.11 &> /dev/null; then
+    PYTHON="python3.11"
+else
+    echo "❌ python3.11 not found. OmniVoice requires Python 3.11." >&2
+    exit 1
+fi
+
+exec "$PYTHON" "$SCRIPT_DIR/omnivoice_generator.py" "$@"

@@ -74,6 +74,54 @@ uv run audiobook_generator.py chapter.md --concurrent --workers 5
 uv run audiobook_generator.py chapter.md --concurrent --workers 7
 ```
 
+### Local OmniVoice Mode
+
+Use this when you want local TTS with OmniVoice (600+ languages, voice cloning, voice design) instead of the Gemini API. No API key required.
+
+**Quick start:**
+
+```bash
+# Default voice (Kore)
+./ov chapter.md
+
+# Named voice
+./ov Kore chapter.md
+
+# With advanced options
+./ov chapter.md --num-step 50 --speed 1.0
+```
+
+Output is an `.mp3` file created next to the input file.
+
+**Voice samples layout:**
+
+```text
+voices/
+├── default/
+│   ├── Kore.mp3    # 3-10s reference audio
+│   └── Kore.txt    # Exact transcript of the audio
+└── <voice_name>/   # Custom voice
+    ├── <voice_name>.mp3
+    └── <voice_name>.txt
+```
+
+`voices/` is gitignored — voice samples are personal data, do not commit them.
+
+**Advanced options:**
+
+```bash
+./ov chapter.md --device mps          # Apple Silicon GPU (default)
+./ov chapter.md --device cpu          # Force CPU
+./ov chapter.md --num-step 50         # Diffusion steps (default: 50)
+./ov chapter.md --speed 1.0           # Speech speed (default: 1.0)
+./ov chapter.md --language vi         # Language (default: vi)
+./ov chapter.md --max-tokens 500      # Max tokens per chunk
+./ov chapter.md --overwrite           # Overwrite existing output
+./ov chapter.md --keep-wav            # Keep intermediate WAV
+./ov chapter.md --resume             # Resume from checkpoint after error
+./ov chapter.md --output custom.mp3   # Custom output path
+```
+
 ### Performance Comparison
 
 | File Size | Sequential | Concurrent (3 workers) | Speedup |

@@ -3,6 +3,9 @@ __pycache__/
 *.py[codz]
 *$py.class
 
+# macOS
+.DS_Store
+
 # C extensions
 *.so
 
@@ -208,6 +211,12 @@ __marimo__/
 
 # Output audio files
 *.wav
+
+# Voice samples (personal voice data — do not commit)
+voices/
+
+# Resume checkpoints
+.checkpoint_*.json
 
 # API JSON
 api_usage.json
