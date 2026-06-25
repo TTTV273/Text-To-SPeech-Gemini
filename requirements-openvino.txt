@@ -1,0 +1,5 @@
+# Optional Phase 2 OpenVINO/NNCF dependencies for OmniVoice Linux CPU.
+# Install after requirements-omnivoice-linux.txt in .venv-omnivoice.
+
+openvino
+nncf

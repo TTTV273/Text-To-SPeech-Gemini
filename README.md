@@ -181,6 +181,38 @@ For Xeon E5-2670 dual-socket systems, `16` is the single-process baseline. `32` 
 
 The NUMA launcher defaults to 8 threads per process and pins CPU execution plus memory allocation to one socket. For batch audiobook work, run one process on node 0 and another on node 1 for different files/chunks.
 
+### OpenVINO Phase (experimental)
+
+`ov-openvino` uses an OpenVINO IR model instead of native PyTorch for the LLM forward pass. Convert the model first, then run:
+
+```bash
+# One-time conversion (FP32 IR, ~1.2 GB)
+.venv-omnivoice/bin/python scripts/convert_omnivoice_openvino.py
+
+# Optional: W8A8 quantization (~587 MB)
+.venv-omnivoice/bin/python scripts/quantize_omnivoice_openvino.py
+
+# Run (auto-selects W8A8 if available, falls back to FP32)
+./ov-openvino chapter.md
+./ov-openvino-numa 0 chapter.md
+```
+
+Install OpenVINO deps:
+
+```bash
+pip install -r requirements-openvino.txt
+```
+
+**Benchmark on Xeon E5-2670 (50 steps, 39 tokens, 16 threads):**
+
+| Backend           | Wall time | Model size | RTF   |
+|-------------------|-----------|------------|-------|
+| PyTorch FP32      | 232s      | 1.6 GB     | ~51   |
+| OpenVINO FP32     | 237s      | 1.2 GB     | ~52   |
+| OpenVINO W8A8     | 236s      | 587 MB     | ~52   |
+
+On Sandy Bridge Xeon (AVX-only, no VNNI/AMX), OpenVINO does not outperform native PyTorch. INT8 speedup requires AVX-512 VNNI or AMX (available on Ice Lake+). The W8A8 model is still useful for its smaller memory footprint.
+
 ### Performance Comparison
 
 | File Size | Sequential | Concurrent (3 workers) | Speedup |
