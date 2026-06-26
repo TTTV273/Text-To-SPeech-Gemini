@@ -150,8 +150,11 @@ sudo pacman -S ffmpeg numactl
 **Baseline run:**
 
 ```bash
-./ov-linux chapter.md
-./ov-linux Kore chapter.md --resume
+# Global alias on Linux points to ov-linux
+ov chapter.md --resume
+
+# Explicit launcher also works
+ov-linux Kore chapter.md --resume
 ```
 
 Linux defaults are CPU-safe:
@@ -160,8 +163,9 @@ Linux defaults are CPU-safe:
 device: cpu
 dtype: float32
 num-step: 16
-torch threads: 16
+torch threads: 32 total
 torch inter-op threads: 1
+parallel chunks: 4 workers x 8 threads
 ```
 
 **Benchmark thread counts:**
@@ -172,7 +176,7 @@ torch inter-op threads: 1
 ./ov-linux chapter.md --torch-threads 32 --overwrite
 ```
 
-For Xeon E5-2670 dual-socket systems, `16` is the single-process baseline. `32` is only a benchmark check because SMT can slow down matrix-heavy inference.
+For Xeon E5-2670 dual-socket systems, the default is tuned for long chapters: 4 worker processes, round-robin pinned across NUMA nodes, with 8 PyTorch threads per worker. For short single-chunk files it automatically falls back to sequential mode.
 
 **Batch parallel across 2 NUMA nodes:**
 
@@ -198,11 +202,14 @@ The NUMA launcher defaults to 8 threads per process and pins CPU execution plus 
 **Parallel chunks within a single file:**
 
 ```bash
-# Split chunks across 2 NUMA nodes, 2 workers run in parallel
-ov-linux chapter.md --parallel-chunks 2 --resume
+# Default: 4 workers x 8 threads, pinned round-robin to node 0/1
+ov chapter.md --resume
+
+# Override explicitly if needed
+ov-linux chapter.md --parallel-chunks 4 --torch-threads 32 --resume
 ```
 
-Each worker loads the model once, generates its assigned chunks (interleaved: node 0 gets chunks 1,3,5..., node 1 gets 2,4,6...), and writes WAV files. The parent process merges all chunks in order and converts to MP3. Falls back to sequential if fewer than 2 chunks.
+Each worker loads the model once, generates assigned chunks, and writes WAV files. The parent process merges all chunks in order and converts to MP3. Checkpoint JSON is updated with a file lock after every completed chunk, so interrupted runs can resume without rescanning manually. Falls back to sequential if fewer than 2 chunks.
 
 ### OpenVINO Phase (experimental)
 

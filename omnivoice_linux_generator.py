@@ -1,4 +1,5 @@
 import argparse
+import fcntl
 import os
 import shutil
 import subprocess
@@ -8,8 +9,9 @@ from pathlib import Path
 import omnivoice_generator as ov
 
 
-DEFAULT_TORCH_THREADS = 16
+DEFAULT_TORCH_THREADS = 32
 DEFAULT_TORCH_INTEROP_THREADS = 1
+DEFAULT_PARALLEL_CHUNKS = 4
 
 
 def configure_torch_cpu_threads(torch_module, threads: int, interop_threads: int) -> None:
@@ -69,6 +71,42 @@ def load_linux_model(device: str | None, dtype_name: str):
         kwargs["device_map"] = device
 
     return OmniVoice.from_pretrained("k2-fsa/OmniVoice", **kwargs)
+
+
+def _update_checkpoint_completed(
+    checkpoint_path: Path,
+    input_file: str,
+    input_hash: str,
+    voice_name: str,
+    ref_audio: Path,
+    ref_audio_hash: str,
+    max_tokens: int,
+    normalize_text: bool,
+    num_step: int,
+    total_chunks: int,
+    chunk_index: int,
+) -> None:
+    """Atomically add one completed chunk to the checkpoint."""
+    lock_path = checkpoint_path.with_suffix(checkpoint_path.suffix + ".lock")
+    with open(lock_path, "w", encoding="utf-8") as lock_file:
+        fcntl.flock(lock_file, fcntl.LOCK_EX)
+        checkpoint = ov.load_checkpoint(checkpoint_path) or {}
+        completed = set(checkpoint.get("completed_chunks", []))
+        completed.add(chunk_index)
+        ov.save_checkpoint(
+            checkpoint_path,
+            input_file,
+            input_hash,
+            voice_name,
+            ref_audio,
+            ref_audio_hash,
+            max_tokens,
+            normalize_text,
+            num_step,
+            total_chunks,
+            sorted(completed),
+        )
+        fcntl.flock(lock_file, fcntl.LOCK_UN)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -140,8 +178,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--parallel-chunks",
         type=int,
-        default=1,
-        help="Number of parallel chunk workers, each pinned to a NUMA node (default: 1)",
+        default=DEFAULT_PARALLEL_CHUNKS,
+        help=f"Number of parallel chunk workers, each pinned to a NUMA node (default: {DEFAULT_PARALLEL_CHUNKS})",
     )
     parser.add_argument(
         "--_worker-chunks",
@@ -171,6 +209,10 @@ def _run_worker(args) -> None:
     else:
         chunks = [clean_text]
 
+    checkpoint_path = ov.get_checkpoint_path(output_path)
+    input_hash = ov.calculate_file_hash(Path(file_path))
+    ref_audio_hash = ov.calculate_file_hash(ref_audio)
+
     assigned = sorted(int(x) for x in args._worker_chunks.split(","))
     print(f"[Worker] Chunks: {assigned}")
 
@@ -182,6 +224,19 @@ def _run_worker(args) -> None:
         print(f"[Worker] Generating chunk {index}/{len(chunks)} ({count_tokens(chunk_text):,} tokens)...")
         audio = ov.generate_audio(model, chunk_text, ref_audio, ref_text, args)
         ov.write_wav(chunk_path, audio)
+        _update_checkpoint_completed(
+            checkpoint_path,
+            file_path,
+            input_hash,
+            voice_name,
+            ref_audio,
+            ref_audio_hash,
+            args.max_tokens,
+            args.normalize,
+            args.num_step,
+            len(chunks),
+            index,
+        )
         print(f"[Worker] Saved: {chunk_path.name}")
 
 
@@ -239,11 +294,13 @@ def _run_parallel(voice_name: str, file_path: str, args) -> Path:
                 "Install with: sudo pacman -S numactl"
             )
 
-        n_workers = args.parallel_chunks
+        n_workers = min(args.parallel_chunks, len(chunks_to_process))
         worker_threads = max(1, args.torch_threads // n_workers)
 
-        node0_chunks = [i for idx, i in enumerate(chunks_to_process) if idx % 2 == 0]
-        node1_chunks = [i for idx, i in enumerate(chunks_to_process) if idx % 2 == 1]
+        # Distribute chunks round-robin across N workers
+        worker_chunks: list[list[int]] = [[] for _ in range(n_workers)]
+        for idx, chunk_id in enumerate(chunks_to_process):
+            worker_chunks[idx % n_workers].append(chunk_id)
 
         print(f"\n{'=' * 60}")
         print("OmniVoice TTS Generator (Parallel Chunks)")
@@ -254,22 +311,38 @@ def _run_parallel(voice_name: str, file_path: str, args) -> Path:
         print(f"Chunks: {total_chunks} ({len(completed_set)} done, {len(chunks_to_process)} to generate)")
         print(f"Steps:  {args.num_step}")
         print(f"Workers: {n_workers} x {worker_threads} threads")
-        print(f"  Node 0: chunks {node0_chunks}")
-        print(f"  Node 1: chunks {node1_chunks}")
+        for wi, wc in enumerate(worker_chunks):
+            node = wi % 2
+            print(f"  Worker {wi} (node {node}): {len(wc)} chunks {wc}")
 
         if output_path.exists() and not args.overwrite:
             raise FileExistsError(
                 f"Output file already exists: {output_path}\nUse --overwrite to replace it."
             )
 
+        ov.save_checkpoint(
+            checkpoint_path,
+            file_path,
+            input_hash,
+            voice_name,
+            ref_audio,
+            ref_audio_hash,
+            args.max_tokens,
+            args.normalize,
+            args.num_step,
+            total_chunks,
+            sorted(completed_set),
+        )
+
         python = sys.executable
         script = str(Path(__file__).resolve())
 
         workers: list[tuple[int, subprocess.Popen]] = []
-        for node, node_chunks in [(0, node0_chunks), (1, node1_chunks)]:
-            if not node_chunks:
+        for wi, wc in enumerate(worker_chunks):
+            if not wc:
                 continue
-            chunks_str = ",".join(str(i) for i in node_chunks)
+            node = wi % 2
+            chunks_str = ",".join(str(i) for i in wc)
             cmd = [
                 "numactl", f"--cpunodebind={node}", f"--membind={node}",
                 python, script,
@@ -299,19 +372,19 @@ def _run_parallel(voice_name: str, file_path: str, args) -> Path:
             env["MKL_NUM_THREADS"] = str(worker_threads)
             env["OV_TORCH_THREADS"] = str(worker_threads)
 
-            print(f"\nLaunching node {node} worker ({len(node_chunks)} chunks)...")
+            print(f"\nLaunching worker {wi} (node {node}, {len(wc)} chunks)...")
             proc = subprocess.Popen(cmd, env=env)
-            workers.append((node, proc))
+            workers.append((wi, proc))
 
         # Wait for all workers
         failed = False
-        for node, proc in workers:
+        for wi, proc in workers:
             ret = proc.wait()
             if ret != 0:
-                print(f"Node {node} worker FAILED (exit {ret})")
+                print(f"Worker {wi} FAILED (exit {ret})")
                 failed = True
             else:
-                print(f"Node {node} worker completed.")
+                print(f"Worker {wi} completed.")
 
         if failed:
             for index in chunks_to_process:
@@ -358,6 +431,9 @@ def _run_parallel(voice_name: str, file_path: str, args) -> Path:
 
     if checkpoint_path.exists():
         checkpoint_path.unlink()
+    lock_path = checkpoint_path.with_suffix(checkpoint_path.suffix + ".lock")
+    if lock_path.exists():
+        lock_path.unlink()
 
     print(f"\nDone: {output_path}")
     return output_path
