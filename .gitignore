@@ -142,6 +142,7 @@ celerybeat.pid
 .envrc
 .venv
 .venv-omnivoice
+.venv-vieneu
 env/
 venv/
 ENV/

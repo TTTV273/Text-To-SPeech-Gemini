@@ -243,6 +243,75 @@ pip install -r requirements-openvino.txt
 
 On Sandy Bridge Xeon (AVX-only, no VNNI/AMX), OpenVINO does not outperform native PyTorch. INT8 speedup requires AVX-512 VNNI or AMX (available on Ice Lake+). The W8A8 model is still useful for its smaller memory footprint.
 
+### Local VieNeu-TTS on Linux CPU
+
+Use this path when you want faster local Vietnamese TTS on CPU with VieNeu-TTS v3 Turbo (torch-free ONNX runtime). The default command is `vieneu`.
+
+**Recommended environment:**
+
+```bash
+# Python 3.12 recommended
+~/.pyenv/versions/3.12.11/bin/python3.12 -m venv .venv-vieneu
+source .venv-vieneu/bin/activate
+pip install -r requirements-vieneu-linux.txt
+```
+
+**List available preset voices:**
+
+```bash
+vieneu --list-voices
+```
+
+Current preset voices include:
+
+- `Bình An` - Default, calm male voice
+- `Xuân Vĩnh` - Cheerful male voice
+- `Ngọc Lan` - Gentle female voice
+- `Ngọc Linh` - Bright female voice
+- `Gia Bảo` - Smooth male voice
+- `Thái Sơn` - Strong male voice
+- `Đức Trí` - Clear male voice
+- `Mỹ Duyên` - Smooth female voice
+- `Trúc Ly` - Youthful female voice
+- `Trọng Hữu` - Scholarly male voice
+
+**Common commands:**
+
+```bash
+# Default preset voice (Bình An)
+vieneu chapter.md
+
+# Different preset voices
+vieneu chapter.md --voice "Xuân Vĩnh"
+vieneu chapter.md --voice "Ngọc Lan"
+vieneu chapter.md --voice "Ngọc Linh"
+vieneu chapter.md --voice "Gia Bảo"
+vieneu chapter.md --voice "Thái Sơn"
+vieneu chapter.md --voice "Đức Trí"
+vieneu chapter.md --voice "Mỹ Duyên"
+vieneu chapter.md --voice "Trúc Ly"
+vieneu chapter.md --voice "Trọng Hữu"
+
+# Clone Gemini Kore voice from local reference audio
+vieneu chapter.md --ref-audio voices/default/Kore.MP3
+
+# Clone Kore and choose output path explicitly
+vieneu chapter.md --ref-audio voices/default/Kore.MP3 --output chapter_Kore.mp3
+
+# Resume after interruption
+vieneu chapter.md --resume
+
+# Smaller chunks for testing / benchmarking
+vieneu chapter.md --max-tokens 120 --overwrite
+```
+
+**Notes:**
+
+- Do not use `--voice` together with `--ref-audio`.
+- `Kore` in VieNeu is used via cloning from `voices/default/Kore.MP3`, not as a native preset voice.
+- VieNeu defaults to `--backend onnx` on CPU.
+- Vietnamese normalization is OFF by default because VieNeu already uses `sea-g2p` internally.
+
 ### Performance Comparison
 
 | File Size | Sequential | Concurrent (3 workers) | Speedup |

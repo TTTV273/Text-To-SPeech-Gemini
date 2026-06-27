@@ -1,0 +1,12 @@
+# Linux CPU VieNeu-TTS dependencies.
+# VieNeu-TTS v3 Turbo runs torch-free on CPU via ONNX Runtime.
+# Recommended install (locked env for fastest CPU inference):
+#   uv venv .venv-vieneu --python 3.12
+#   source .venv-vieneu/bin/activate
+#   uv pip install -r requirements-vieneu-linux.txt
+# Or the minimal SDK install:
+#   pip install vieneu
+
+vieneu
+soundfile
+tiktoken>=0.5.0

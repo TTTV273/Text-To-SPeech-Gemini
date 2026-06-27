@@ -1,0 +1,28 @@
+#!/bin/bash
+# vieneu-linux - VieNeu-TTS Linux CPU wrapper
+# Usage: vieneu-linux <file> [options]
+
+set -euo pipefail
+
+SCRIPT_SOURCE="$0"
+while [ -L "$SCRIPT_SOURCE" ]; do
+    SCRIPT_DIR="$(cd "$(dirname "$SCRIPT_SOURCE")" && pwd)"
+    SCRIPT_SOURCE="$(readlink "$SCRIPT_SOURCE")"
+    [[ "$SCRIPT_SOURCE" != /* ]] && SCRIPT_SOURCE="$SCRIPT_DIR/$SCRIPT_SOURCE"
+done
+SCRIPT_DIR="$(cd "$(dirname "$SCRIPT_SOURCE")" && pwd)"
+
+if [ -x "$SCRIPT_DIR/.venv-vieneu/bin/python" ]; then
+    PYTHON="$SCRIPT_DIR/.venv-vieneu/bin/python"
+elif [ -x "$SCRIPT_DIR/.venv/bin/python" ]; then
+    PYTHON="$SCRIPT_DIR/.venv/bin/python"
+else
+    echo "Error: .venv-vieneu not found. Create it with:" >&2
+    echo "  ~/.pyenv/versions/3.12.11/bin/python3.12 -m venv .venv-vieneu" >&2
+    echo "  .venv-vieneu/bin/pip install -r requirements-vieneu-linux.txt" >&2
+    exit 1
+fi
+
+export PYTHONPATH="$SCRIPT_DIR/src${PYTHONPATH:+:$PYTHONPATH}"
+
+exec "$PYTHON" "$SCRIPT_DIR/vieneu_linux_generator.py" "$@"
