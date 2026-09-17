@@ -113,7 +113,7 @@ def split_into_chunks_fallback(text: str, max_tokens: int) -> list[str]:
 
 def load_text_chunker():
     try:
-        from text_chunker import count_tokens, split_into_chunks
+        from src.text_chunker import count_tokens, split_into_chunks
         return count_tokens, split_into_chunks
     except ImportError as exc:
         if exc.name != "tiktoken" and "tiktoken is required" not in str(exc):

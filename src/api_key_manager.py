@@ -61,6 +61,7 @@ class APIKeyManager:
 
     def save_usage(self):
         """Persist usage data to JSON file"""
+        self.usage_file.parent.mkdir(parents=True, exist_ok=True)
         with open(self.usage_file, "w") as f:
             json.dump(self.usage_data, f, indent=2)
 
@@ -190,6 +191,10 @@ class APIKeyManager:
             active_marker = "← ACTIVE" if is_active else ""
 
             status = "✅" if usage < self.threshold else "⚠️"
+            if self.threshold >= 999999:
+                limit_display = f"{usage} requests (Paid/Unlimited)"
+            else:
+                limit_display = f"{usage}/{self.threshold + 1} requests"
             print(
-                f"  {status} Key #{i + 1} ({key_hash}): {usage}/10 requests {active_marker}"
+                f"  {status} Key #{i + 1} ({key_hash}): {limit_display} {active_marker}"
             )

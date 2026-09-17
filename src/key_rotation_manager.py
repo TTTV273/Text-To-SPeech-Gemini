@@ -31,6 +31,7 @@ class KeyRotationManager:
         Args:
             api_keys: List các API keys
         """
+        self.api_keys = list(api_keys)
         self.available_queue = Queue()
         self.cooldown_dict = {}  # {key: cooldown_until_timestamp}
         self.removed_keys = set()  # Keys đã bị remove (quota exhausted)
@@ -48,6 +49,24 @@ class KeyRotationManager:
             API key string, hoặc None nếu tất cả keys đều cooldown
         """
         with self.lock:
+            # Single-key mode: Hỗ trợ nhiều workers dùng chung 1 key trả phí
+            if len(self.api_keys) == 1:
+                key = self.api_keys[0]
+                if key in self.removed_keys:
+                    return None
+                if key in self.cooldown_dict:
+                    current_time = time.time()
+                    cooldown_until = self.cooldown_dict[key]
+                    if current_time < cooldown_until:
+                        wait_time = cooldown_until - current_time
+                        print(
+                            f"⏳ Key in cooldown, waiting {wait_time:.1f}s..."
+                        )
+                        time.sleep(wait_time)
+                    del self.cooldown_dict[key]
+                return key
+
+            # Multi-key rotation workflow:
             # Refresh cooldown keys trước
             self._refresh_cooldown_keys()
 
@@ -96,6 +115,9 @@ class KeyRotationManager:
             key: API key cần return
         """
         with self.lock:
+            if len(self.api_keys) == 1:
+                return  # Single-key mode: không cần đẩy lại queue
+
             if key in self.removed_keys:
                 return  # Key đã bị remove, không return
 

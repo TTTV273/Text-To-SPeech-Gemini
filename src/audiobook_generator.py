@@ -21,10 +21,11 @@ from .text_chunker import count_tokens, split_into_chunks
 # Note: Token counting and chunking functions are now in text_chunker.py
 
 load_dotenv()
-api_key_manager = APIKeyManager(usage_file="data/api_usage.json", threshold=9)
+api_key_manager = APIKeyManager(usage_file="data/api_usage.json", threshold=999999)
 
 # Configuration
 MAX_TOKENS_PER_CHUNK = 1000  # Chỉ cần sửa 1 chỗ này để thay đổi chunk size!
+DEFAULT_MODEL = "gemini-3.1-flash-tts-preview"
 
 
 def classify_error(error: Exception) -> str:
@@ -289,7 +290,7 @@ def convert_wav_to_mp3(wav_path, mp3_path, bitrate="128k", delete_wav=True):
         return False
 
 
-def generate_audio_data(client, text, voice="Kore", rotation_manager=None):
+def generate_audio_data(client, text, voice="Kore", rotation_manager=None, model=DEFAULT_MODEL):
     """
     Generate audio with automatic key rotation using KeyRotationManager
 
@@ -298,6 +299,7 @@ def generate_audio_data(client, text, voice="Kore", rotation_manager=None):
         text: Text to convert to speech
         voice: Voice name (default: Kore)
         rotation_manager: KeyRotationManager instance (required)
+        model: TTS model name (default: DEFAULT_MODEL)
 
     Returns:
         bytes: Audio data
@@ -337,7 +339,7 @@ def generate_audio_data(client, text, voice="Kore", rotation_manager=None):
 
             # Call API
             response = client.models.generate_content(
-                model="gemini-2.5-flash-preview-tts",
+                model=model,
                 contents=text,
                 config=types.GenerateContentConfig(
                     response_modalities=["AUDIO"],
@@ -417,7 +419,7 @@ def generate_audio_data(client, text, voice="Kore", rotation_manager=None):
     raise Exception(f"❌ Failed to generate audio after {max_attempts} attempts")
 
 
-def process_chapter(client, file_path, voice="Kore", rotation_manager=None):
+def process_chapter(client, file_path, voice="Kore", rotation_manager=None, model=DEFAULT_MODEL):
     try:
         input_path = Path(file_path)
         parent_dir = input_path.parent
@@ -430,6 +432,7 @@ def process_chapter(client, file_path, voice="Kore", rotation_manager=None):
         output_path_wav = output_dir / output_filename_wav
 
         print(f"\n📖 Đang xử lý: {input_path.name}")
+        print(f"🤖 Model: {model}")
         output_dir.mkdir(exist_ok=True)
         print(f"📁 Output directory: {output_dir}")
 
@@ -459,7 +462,7 @@ def process_chapter(client, file_path, voice="Kore", rotation_manager=None):
             print(f"\n🎙️  Đang xử lý chunk {i}/{len(text_chunks)}...")
             print(f"   Chunk size: {count_tokens(chunk):,} tokens")
 
-            audio_part = generate_audio_data(client, chunk, voice=voice, rotation_manager=rotation_manager)
+            audio_part = generate_audio_data(client, chunk, voice=voice, rotation_manager=rotation_manager, model=model)
             all_audio_parts.append(audio_part)
             total_bytes += len(audio_part)
 
@@ -507,7 +510,7 @@ def process_chapter(client, file_path, voice="Kore", rotation_manager=None):
         return False
 
 
-def process_chapter_concurrent(client, file_path, voice="Kore", max_workers=3, resume=False, rotation_manager=None):
+def process_chapter_concurrent(client, file_path, voice="Kore", max_workers=3, resume=False, rotation_manager=None, model=DEFAULT_MODEL):
     """
     Process chapter with concurrent chunk processing using individual chunk files.
     """
@@ -526,6 +529,7 @@ def process_chapter_concurrent(client, file_path, voice="Kore", max_workers=3, r
 
         print(f"\n{'='*60}")
         print(f"🎯 Processing Chapter: {input_path.name}")
+        print(f"🤖 Model: {model}")
         print(f"⚡ Concurrent Mode: {max_workers} workers")
         if resume:
             print(f"🔄 Resume Mode: Enabled")
@@ -600,7 +604,7 @@ def process_chapter_concurrent(client, file_path, voice="Kore", max_workers=3, r
                 chunk_client = genai.Client(api_key=assigned_key)
                 
                 # Generate audio
-                audio_data = generate_audio_data(chunk_client, chunk_text, voice=voice, rotation_manager=rotation_manager)
+                audio_data = generate_audio_data(chunk_client, chunk_text, voice=voice, rotation_manager=rotation_manager, model=model)
                 
                 # Save individual chunk file
                 chunk_path = get_chunk_path(output_dir, input_path.stem, chunk_id)
@@ -721,6 +725,11 @@ def main():
     )
     parser.add_argument("file", nargs="?", help="Markdown file to process")
     parser.add_argument("--voice", default="Kore", help="Voice name (default: Kore)")
+    parser.add_argument(
+        "--model",
+        default=DEFAULT_MODEL,
+        help=f"Model name (default: {DEFAULT_MODEL})",
+    )
 
     # Concurrent processing flags
     parser.add_argument(
@@ -753,6 +762,7 @@ def main():
     # Print header
     print("\n" + "=" * 60)
     print("🎙️  Gemini TTS Audiobook Generator")
+    print(f"🤖 Model: {args.model}")
     print("=" * 60)
 
     # Load API keys
@@ -782,13 +792,13 @@ def main():
         print(f"\n⚡ Using {mode_text} ({args.workers} workers)\n")
 
         success = process_chapter_concurrent(
-            client, file_path, voice=args.voice, max_workers=args.workers, resume=args.resume, rotation_manager=rotation_manager
+            client, file_path, voice=args.voice, max_workers=args.workers, resume=args.resume, rotation_manager=rotation_manager, model=args.model
         )
     else:
         print(
             f"\n📝 Using SYNCHRONOUS mode (use --concurrent for faster processing)\n"
         )
-        success = process_chapter(client, file_path, voice=args.voice, rotation_manager=rotation_manager)
+        success = process_chapter(client, file_path, voice=args.voice, rotation_manager=rotation_manager, model=args.model)
 
     # Final result
     if success:
