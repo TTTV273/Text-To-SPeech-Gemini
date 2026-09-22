@@ -1,15 +1,17 @@
 # Text-To-Speech-Gemini
 
-A production-ready audiobook generator using Google's Gemini 2.5 TTS API with advanced features including multi-API key rotation, concurrent processing, intelligent 3-level text chunking, error recovery, and checkpoint-based resume.
+A production-ready audiobook generator using Google's Gemini TTS API (default: `gemini-3.1-flash-tts-preview`) with advanced features including single paid API key support, multi-API key rotation, concurrent processing, intelligent 3-level text chunking, error recovery, and checkpoint-based resume.
 
 ## 🎯 Project Overview
 
-Convert Markdown chapters into high-quality audiobook files (`.wav`) using Google's Gemini Text-to-Speech API with native multi-speaker support and controllable speech.
+Convert Markdown chapters into high-quality audiobook files (`.mp3` / `.wav`) using Google's Gemini Text-to-Speech API with native multi-speaker support and controllable speech.
 
 **Key Highlights:**
+- 🤖 **Latest Gemini 3.1 TTS** (`gemini-3.1-flash-tts-preview`) with natural prosody and expression
+- 🔑 **Flexible API Support:** Seamlessly run with **1 Paid API Key** (unlimited) or rotate across **Free Tier keys**
 - ⚡ **Concurrent processing** with ThreadPoolExecutor for 2-3× speed improvement
-- 🔄 **Queue-based key rotation** with intelligent cooldown mechanism (0 wasted retries!) ⭐ NEW!
-- 💾 **Resume feature** automatically resumes from checkpoint (91% quota savings!)
+- 🔄 **Queue-based key rotation** with intelligent cooldown mechanism (0 wasted retries!)
+- 💾 **Resume feature** automatically resumes from checkpoint (saves quota on interruption!)
 - 🎙️ **30 prebuilt voices** with natural language control
 - 🔒 **Thread-safe** quota tracking and key assignment
 - 📊 **Real-time progress tracking** with detailed metrics
@@ -30,19 +32,22 @@ python -m venv .venv
 source .venv/bin/activate  # On Windows: .venv\Scripts\activate
 
 # Install dependencies
-uv pip install -r requirements.txt
+pip install -r requirements.txt
 ```
 
 ### Setup API Keys
 
-Create a `.env` file with your Gemini API keys:
+Create a `.env` file with your Gemini API key(s):
 
 ```bash
-# .env
+# Option 1: Single Paid API Key (Recommended - Unlimited daily requests)
+GEMINI_API_KEY_1=your_paid_api_key_here
+
+# Option 2: Multiple Free Tier Keys (Automatic queue rotation)
 GEMINI_API_KEY_1=your_first_key_here
 GEMINI_API_KEY_2=your_second_key_here
 GEMINI_API_KEY_3=your_third_key_here
-# ... GEMINI_API_KEY_N (where N is the key number, e.g., GEMINI_API_KEY_8, GEMINI_API_KEY_9, etc.)
+# ... add more keys for rotation
 ```
 
 **Get API keys:** https://aistudio.google.com/app/apikey
@@ -54,24 +59,27 @@ GEMINI_API_KEY_3=your_third_key_here
 ### Basic Usage (Synchronous Mode)
 
 ```bash
-# Process a single chapter
-uv run audiobook_generator.py path/to/chapter.md
+# Process a single chapter (default model: gemini-3.1-flash-tts-preview)
+python -m src.audiobook_generator path/to/chapter.md
 
-# With custom voice
-uv run audiobook_generator.py path/to/chapter.md --voice Puck
+# With custom voice (e.g. Zephyr, Puck, Fenrir)
+python -m src.audiobook_generator path/to/chapter.md --voice Zephyr
+
+# With specific model (e.g. fallback to Gemini 2.5)
+python -m src.audiobook_generator path/to/chapter.md --model gemini-2.5-flash-preview-tts
 ```
 
 ### ⚡ Concurrent Mode (Recommended for Speed)
 
 ```bash
-# Use 3 workers (default)
-uv run audiobook_generator.py chapter.md --concurrent
+# Standard run (3 workers)
+python -m src.audiobook_generator chapter.md --concurrent --workers 3
 
-# Use 5 workers (faster for large files)
-uv run audiobook_generator.py chapter.md --concurrent --workers 5
+# Faster processing for long files (5 workers)
+python -m src.audiobook_generator chapter.md --concurrent --workers 5
 
-# Maximum speed (7 workers)
-uv run audiobook_generator.py chapter.md --concurrent --workers 7
+# Resume interrupted run
+python -m src.audiobook_generator chapter.md --concurrent --workers 3 --resume
 ```
 
 ### Local OmniVoice Mode
@@ -331,10 +339,10 @@ Resume from checkpoint when processing fails mid-chapter:
 
 ```bash
 # Resume from last checkpoint (skip completed chunks)
-uv run audiobook_generator.py chapter.md --concurrent --resume
+python -m src.audiobook_generator chapter.md --concurrent --resume
 
 # Works with any worker count
-uv run audiobook_generator.py chapter.md --concurrent --workers 5 --resume
+python -m src.audiobook_generator chapter.md --concurrent --workers 5 --resume
 ```
 
 **How it works:**
@@ -469,7 +477,7 @@ your-book/
 
 ### Chunk Size Configuration
 
-**Location:** `audiobook_generator.py:27`
+**Location:** `src/audiobook_generator.py:27`
 
 ```python
 MAX_TOKENS_PER_CHUNK = 1000  # Adjust this value to change chunk size
@@ -585,38 +593,40 @@ If processing fails mid-chapter, completed chunks are automatically saved:
 
 ```
 Text-To-Speech-Gemini/
-├── audiobook_generator.py       # Main processing script
-├── api_key_manager.py           # Multi-key quota tracking & usage logging
-├── key_rotation_manager.py      # Queue-based key rotation with cooldown ⭐ NEW!
-├── text_chunker.py              # 3-level intelligent text chunking
+├── src/
+│   ├── audiobook_generator.py   # Main processing script (sync & concurrent)
+│   ├── api_key_manager.py       # API key quota tracking & usage logging
+│   ├── key_rotation_manager.py  # Single/Multi-key rotation with cooldown
+│   ├── text_chunker.py          # 3-level intelligent text chunking
+│   └── validators.py            # Input validation utilities
 ├── api_usage.json               # Daily usage tracking (auto-generated)
 ├── .env                         # API keys (not committed)
 ├── requirements.txt             # Python dependencies
-├── PLAN.md                      # Detailed implementation plan (all phases)
-├── CLAUDE.md                    # AI collaboration guidelines
+├── AGENTS.md                    # Agent guidelines
+├── CLAUDE.md                    # Claude Code guidelines
+├── GEMINI.md                    # Gemini CLI guidelines
 └── README.md                    # This file
 ```
 
 ### Key Files
 
-- **audiobook_generator.py:** Core TTS processing with sync + concurrent modes
-- **api_key_manager.py:** Thread-safe quota tracking and daily usage logging
-- **key_rotation_manager.py:** Queue-based key rotation with intelligent cooldown mechanism ⭐ NEW!
-- **text_chunker.py:** 3-level intelligent text splitting (paragraph/sentence/word)
-- **PLAN.md:** Complete project history with all 10 implementation phases
+- **src/audiobook_generator.py:** Core TTS processing with sync + concurrent modes
+- **src/api_key_manager.py:** Thread-safe quota tracking and daily usage logging
+- **src/key_rotation_manager.py:** Single-key concurrency and queue-based multi-key rotation
+- **src/text_chunker.py:** 3-level intelligent text splitting (paragraph/sentence/word)
 
 ### Testing
 
 ```bash
 # Test basic functionality
-uv run audiobook_generator.py test_concurrent_mini.md
+python -m src.audiobook_generator test_concurrent_mini.md
 
 # Test concurrent mode
-uv run audiobook_generator.py test_concurrent_mini.md --concurrent --workers 3
+python -m src.audiobook_generator test_concurrent_mini.md --concurrent --workers 3
 
 # Benchmark performance
-time uv run audiobook_generator.py chapter.md --concurrent --workers 3
-time uv run audiobook_generator.py chapter.md  # Compare with sync
+time python -m src.audiobook_generator chapter.md --concurrent --workers 3
+time python -m src.audiobook_generator chapter.md  # Compare with sync
 ```
 
 ---
