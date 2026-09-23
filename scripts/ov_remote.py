@@ -258,7 +258,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("-o", "--output", help="Output file path (default: TTS/output/<stem>.<format>)")
     parser.add_argument("--format", choices=["mp3", "wav"], default="mp3", help="Output format (default: mp3)")
     parser.add_argument("--speed", type=float, default=1.0, help="Speech speed multiplier (default: 1.0)")
-    parser.add_argument("--num-step", type=int, default=32, help="Inference diffusion steps (default: 32)")
+    parser.add_argument("--num-step", "--steps", "--step", dest="num_step", type=int, default=32, help="Inference diffusion steps (default: 32)")
     parser.add_argument("--max-tokens", type=int, default=500, help="Max tokens per chunk (default: 500)")
     parser.add_argument("--no-normalize", dest="normalize", action="store_false", default=True, help="Disable Vietnamese normalization")
     parser.add_argument("--no-markdown", dest="markdown", action="store_false", default=True, help="Disable Markdown cleaning")
