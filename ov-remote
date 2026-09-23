@@ -1,0 +1,22 @@
+#!/bin/bash
+# ov-remote — OmniVoice Remote TTS client for Mac
+# Usage:
+#   ./ov-remote --set-server https://xxxx.trycloudflare.com
+#   ./ov-remote chapter.md
+#   ./ov-remote chapter.md Kore
+#   ./ov-remote --health
+
+# Resolve directory of this script
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# Find Python with 'requests' installed
+if [ -x "$SCRIPT_DIR/.venv/bin/python" ]; then
+    PYTHON="$SCRIPT_DIR/.venv/bin/python"
+elif command -v python3 &> /dev/null; then
+    PYTHON="python3"
+else
+    echo "❌ Python 3 not found." >&2
+    exit 1
+fi
+
+exec "$PYTHON" "$SCRIPT_DIR/scripts/ov_remote.py" "$@"
