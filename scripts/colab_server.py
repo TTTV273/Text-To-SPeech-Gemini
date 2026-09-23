@@ -154,8 +154,13 @@ def worker_loop():
             }
 
             # 4. Resolve voice
-            voice_dir = PROJECT_ROOT / "voices"
-            ref_audio, ref_text = resolve_voice(voice_name, voice_dir)
+            if task_data.get("ref_audio_path") and task_data.get("ref_text"):
+                ref_audio = Path(task_data["ref_audio_path"])
+                ref_text = task_data["ref_text"]
+                print(f"🎙️  Using task-provided voice: {ref_audio.name}")
+            else:
+                voice_dir = PROJECT_ROOT / "voices"
+                ref_audio, ref_text = resolve_voice(voice_name, voice_dir)
 
             # 5. Load model & prepare args
             model = get_cached_model()
@@ -258,6 +263,8 @@ def list_voices():
 async def create_tts_task(
     file: Optional[UploadFile] = File(None),
     text: Optional[str] = Form(None),
+    ref_audio_file: Optional[UploadFile] = File(None),
+    ref_text: Optional[str] = Form(None),
     filename: Optional[str] = Form("audiobook"),
     voice: str = Form("default"),
     speed: float = Form(1.0),
@@ -281,6 +288,21 @@ async def create_tts_task(
         raise HTTPException(status_code=400, detail="Input text is empty.")
 
     task_id = str(uuid.uuid4())[:8]
+
+    # Handle uploaded voice sample
+    saved_ref_audio = None
+    saved_ref_text = None
+    if ref_audio_file is not None and ref_text:
+        target_voice_dir = PROJECT_ROOT / "voices" / voice
+        target_voice_dir.mkdir(parents=True, exist_ok=True)
+        audio_name = ref_audio_file.filename or f"{voice}.mp3"
+        dest_audio = target_voice_dir / audio_name
+        dest_audio.write_bytes(await ref_audio_file.read())
+        (target_voice_dir / f"{dest_audio.stem}.txt").write_text(ref_text, encoding="utf-8")
+        saved_ref_audio = str(dest_audio)
+        saved_ref_text = ref_text
+        print(f"📥 Saved uploaded voice '{voice}' to {target_voice_dir}")
+
     TASKS[task_id] = {
         "task_id": task_id,
         "filename": filename,
@@ -299,6 +321,8 @@ async def create_tts_task(
         "text": raw_text,
         "filename": filename,
         "voice": voice,
+        "ref_audio_path": saved_ref_audio,
+        "ref_text": saved_ref_text,
         "speed": speed,
         "num_step": num_step,
         "output_format": output_format,

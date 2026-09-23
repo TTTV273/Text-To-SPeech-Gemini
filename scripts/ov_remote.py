@@ -97,6 +97,27 @@ def list_voices(server_url: str):
         print(f"❌ Could not fetch voices: {e}", file=sys.stderr)
 
 
+def get_local_voice_sample(voice_name: str) -> tuple[Optional[Path], Optional[str]]:
+    """Find voice audio and text in local voices directory on Mac."""
+    voice_dir = PROJECT_ROOT / "voices"
+    target_folder = voice_dir / ("default" if voice_name == "default" else voice_name)
+
+    if target_folder.exists():
+        audio_file = None
+        for ext in [".wav", ".mp3", ".MP3", ".m4a", ".flac"]:
+            candidates = list(target_folder.glob(f"*{ext}"))
+            if candidates:
+                audio_file = candidates[0]
+                break
+
+        txt_candidates = list(target_folder.glob("*.txt"))
+        if audio_file and txt_candidates:
+            ref_text = txt_candidates[0].read_text(encoding="utf-8").strip()
+            return audio_file, ref_text
+
+    return None, None
+
+
 def submit_and_track(
     server_url: str,
     file_path: Path,
@@ -118,6 +139,11 @@ def submit_and_track(
     print(f"\n🚀 Sending '{file_path.name}' to remote GPU...")
     print(f"   Voice: {voice} | Speed: {speed} | Steps: {num_step} | Format: {output_format.upper()}")
 
+    # Find voice files locally to upload if needed
+    local_voice_audio, local_voice_text = get_local_voice_sample(voice)
+    if local_voice_audio and local_voice_text:
+        print(f"🎙️  Attaching voice '{voice}' ({local_voice_audio.name}, {local_voice_audio.stat().st_size / 1024:.1f} KB)")
+
     # 1. Upload & create task
     try:
         with open(file_path, "rb") as f:
@@ -132,7 +158,15 @@ def submit_and_track(
                 "normalize": normalize,
                 "markdown": markdown,
             }
-            resp = requests.post(f"{server_url}/api/tts", files=files, data=data, timeout=30)
+
+            if local_voice_audio and local_voice_text:
+                with open(local_voice_audio, "rb") as f_voice:
+                    files["ref_audio_file"] = (local_voice_audio.name, f_voice, "application/octet-stream")
+                    data["ref_text"] = local_voice_text
+                    resp = requests.post(f"{server_url}/api/tts", files=files, data=data, timeout=60)
+            else:
+                resp = requests.post(f"{server_url}/api/tts", files=files, data=data, timeout=60)
+
             resp.raise_for_status()
             task_info = resp.json()
     except requests.exceptions.RequestException as exc:
