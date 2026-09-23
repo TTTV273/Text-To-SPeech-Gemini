@@ -329,13 +329,15 @@ def main():
         parser.print_help()
         sys.exit(1)
 
-    # 5. Resolve output path
+    # 5. Resolve output path (defaults to <file_dir>/TTS/<stem>.<format>)
+    filename = f"{file_path.stem}.{args.format}" if voice == "default" else f"{file_path.stem}_{voice}.{args.format}"
     if args.output:
         out_path = Path(args.output)
         if out_path.is_dir():
-            out_path = out_path / f"{file_path.stem}_{voice}.{args.format}"
+            out_path = out_path / filename
     else:
-        out_path = DEFAULT_OUTPUT_DIR / f"{file_path.stem}_{voice}.{args.format}"
+        tts_dir = file_path.parent / "TTS"
+        out_path = tts_dir / filename
 
     # 6. Run generation
     submit_and_track(
